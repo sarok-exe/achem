@@ -36,8 +36,9 @@ class ConfigManager:
             current_dir / ".env",
             current_dir / "api.env",
             home_dir / ".achem.env",
-            home_dir / ".achem" / "api.env",
+            home_dir / ".ACHEM" / "api.env",
             home_dir / ".config" / "achem" / "api.env",
+            home_dir / "Documents" / "ACHEM" / "api.env",
         ]
 
         if package_dir:

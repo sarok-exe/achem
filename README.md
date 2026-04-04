@@ -1,6 +1,6 @@
 # ACHEM - Deep Web Research Tool
 
-![ACHEM Banner](https://img.shields.io/badge/ACHEM-v1.0.0-blue?style=for-the-badge)
+![ACHEM Banner](https://img.shields.io/badge/ACHEM-v1.0.4-blue?style=for-the-badge)
 
 > **ACHEM** (Arabic: آشم) is a powerful deep web research tool that aggregates information from 30+ sources, scrapes full content from top results, and generates concise summaries using AI.
 
