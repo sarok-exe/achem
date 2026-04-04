@@ -73,59 +73,6 @@ python src/main.py
 ```bash
 python src/main.py "your search query"
 ```
-
-### Options
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `-l, --limit` | Wikipedia results per query | 10 |
-| `--lang` | Language (en/fr/ar/auto) | auto |
-| `--ddg-limit` | DuckDuckGo results | 30 |
-| `--min-relevance` | Minimum relevance % | 0 |
-| `--no-cache` | Skip cache | False |
-| `--no-wikipedia` | Skip Wikipedia | False |
-| `--clear-cache` | Clear SQLite cache | False |
-
-### Commands (Interactive Mode)
-
-| Command | Description |
-|---------|-------------|
-| `clear` / `cls` | Clear screen |
-| `export` / `save` | Export last summary |
-| `help` / `?` | Show help |
-| `version` / `v` | Show version |
-| `exit` / `quit` / `q` | Exit program |
-
-## Project Structure
-
-```
-ACHEM/
-├── src/
-│   └── achem/              # Main package
-│       ├── __init__.py
-│       ├── main.py        # Entry point
-│       ├── commands.py    # Command handler
-│       ├── config_manager.py    # Config loader
-│       ├── duckduckgo_client.py # DDG search
-│       ├── huggingface_summarizer.py  # HuggingFace AI
-│       ├── openrouter_summarizer.py  # OpenRouter AI (free)
-│       ├── groq_summarizer.py   # Groq AI
-│       ├── gemini_summarizer.py # Gemini AI
-│       ├── output_formatter.py # Terminal UI
-│       ├── search_router.py    # Source priority
-│       ├── sqlite_cache.py     # SQLite cache
-│       ├── spell_checker.py    # Typo correction
-│       ├── text_analyzer.py    # TF-IDF analysis
-│       ├── user_input.py       # Input handler
-│       ├── web_scraper.py      # Trafilatura + BeautifulSoup
-│       └── wikipedia_client.py  # Wikipedia API
-├── .env.example            # Config template
-├── .gitignore
-├── LICENSE
-├── README.md
-└── pyproject.toml         # Package metadata
-```
-
 ## How It Works
 
 ### Two-Pass Search System
