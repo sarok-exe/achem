@@ -1,0 +1,75 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "achem"
+version = "1.0.0"
+description = "Deep Web Research Tool - Aggregates 30+ sources, scrapes content, generates AI summaries"
+readme = "README.md"
+license = "MIT"
+authors = [
+    {name = "ACHEM Contributors"}
+]
+keywords = [
+    "research",
+    "deep-web",
+    "web-scraping",
+    "summarization",
+    "ai",
+    "cli",
+    "tool"
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: WWW/HTTP :: Indexing/Search",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Topic :: Text Processing :: General",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "wikipedia-api>=0.5.4",
+    "rich>=13.0.0",
+    "psutil>=5.9.0",
+    "prompt_toolkit>=3.0.0",
+    "pyfiglet>=0.8.0",
+    "openai>=1.0.0",
+    "ddgs>=3.0.0",
+    "beautifulsoup4>=4.12.0",
+    "requests>=2.31.0",
+]
+
+[project.optional-dependencies]
+arabic = [
+    "arabic-reshaper>=3.0.0",
+    "python-bidi>=0.14.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+achem = "achem.main:main"
+
+[project.urls]
+Homepage = "https://github.com/sarok-exe/achem"
+Documentation = "https://github.com/sarok-exe/achem#readme"
+Repository = "https://github.com/sarok-exe/achem"
+Issues = "https://github.com/sarok-exe/achem/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+achem = ["py.typed"]

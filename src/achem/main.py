@@ -1,0 +1,294 @@
+#!/usr/bin/env python3
+"""ACHEM - Deep Web Research Tool"""
+
+import sys
+import argparse
+import os
+import time
+
+from .user_input import get_user_input
+from .wikipedia_client import WikipediaClient
+from .duckduckgo_client import get_ddg_client
+from .search_router import detect_search_sources, get_source_priority
+from .text_analyzer import TextAnalyzer
+from .huggingface_summarizer import get_hf_summarizer
+from .spell_checker import SpellChecker
+from .commands import is_command, parse_command, execute_command, clear_screen
+from .sqlite_cache import get_sqlite_cache
+from .output_formatter import (
+    print_logo,
+    print_unified_result,
+    get_sticky_footer,
+    print_clear,
+    console,
+    detect_theme,
+    ThemeColors,
+    Align,
+    get_system_info,
+)
+
+_last_search_data = {}
+
+
+def detect_language(text: str) -> str:
+    arabic_chars = sum(1 for c in text if "\u0600" <= c <= "\u06ff")
+    french_chars = sum(1 for c in text if c in "àâäéèêëïîôùûüçÀÂÄÉÈÊËÏÎÔÙÛÜÇ")
+    total = len(text)
+    if total == 0:
+        return "en"
+    if arabic_chars / total > 0.15:
+        return "ar"
+    if french_chars / total > 0.05:
+        return "fr"
+    return "en"
+
+
+def process_deep_search(terms: list[str], theme, args):
+    """Two-Pass Deep Web Research: Pass 1 = 30 links, Pass 2 = Scrape top 3."""
+    global _last_search_data
+    start_time = time.time()
+
+    if not args.no_spell_check:
+        spell_checker = SpellChecker()
+        corrected = []
+        for term in terms:
+            c, _ = spell_checker.correct(term)
+            corrected.append(c)
+        terms = corrected
+
+    query = " ".join(terms)
+    console.print(f"\n🔍 Deep Research: {query}")
+    console.print("=" * 50)
+
+    cache = None
+    if not args.no_cache:
+        cache = get_sqlite_cache(ttl_seconds=args.cache_ttl)
+        if args.clear_cache:
+            cache.invalidate()
+            console.print("[dim]Cache cleared[/dim]")
+
+        cached = cache.get(query)
+        if cached:
+            console.print("[green]📦 Loaded from cache (0.1s)[/green]\n")
+            keywords = cached.get("keywords", [])
+            final_count = len(cached.get("articles", []))
+
+            print_unified_result(
+                cached.get("articles", []),
+                keywords,
+                cached.get("summary", ""),
+                theme,
+                cached.get("summary_mode", "local"),
+                source_count=final_count,
+            )
+
+            _last_search_data = {
+                "summary": cached.get("summary", ""),
+                "query": query,
+                "keywords": keywords,
+                "source_count": final_count,
+            }
+
+            elapsed = time.time() - start_time
+            console.print(
+                f"\n[dim]Research completed in {elapsed:.1f}s (cached)[/dim]\n"
+            )
+            return
+
+    priority_config = get_source_priority()
+    ddg_limit = args.ddg_limit or priority_config.get("total_results", 30)
+    scrape_top = priority_config.get("scraping_targets", 3)
+
+    console.print(f"[cyan]PASS 1:[/cyan] Gathering 30 sources from DuckDuckGo...")
+
+    ddg_client = get_ddg_client(max_results=ddg_limit)
+    ddg_results, scraped_content = ddg_client.search_with_scrape(
+        query, max_results=ddg_limit, scrape_top=scrape_top
+    )
+
+    console.print(f"[green]✓[/green] Found {len(ddg_results)} sources")
+
+    if scraped_content:
+        console.print(
+            f"[cyan]PASS 2:[/cyan] Scraped full content from top {scrape_top} links"
+        )
+
+    articles = []
+    for r in ddg_results:
+        articles.append(
+            {
+                "title": r.get("title", "Unknown"),
+                "summary": r.get("body", ""),
+                "url": r.get("url", ""),
+                "source": "duckduckgo",
+                "relevance_score": 50 + r.get("priority_score", 0),
+            }
+        )
+
+    if not args.no_wikipedia:
+        console.print(f"[cyan]+[/cyan] Adding Wikipedia as secondary reference...")
+        wiki_client = WikipediaClient(use_cache=False)
+        wiki_articles = wiki_client.get_articles_for_queries(terms, limit_per_query=5)
+        for article in wiki_articles:
+            article["source"] = "wikipedia"
+            article["relevance_score"] = 30
+        articles.extend(wiki_articles)
+
+    console.print(f"[cyan]→[/cyan] Analyzing {len(articles)} total sources...\n")
+
+    analyzer = TextAnalyzer()
+    articles = analyzer.score_articles_with_relevance(articles, terms)
+
+    if args.min_relevance > 0:
+        articles, removed = analyzer.filter_by_relevance(articles, args.min_relevance)
+        if removed:
+            console.print(
+                f"[dim]Filtered {len(removed)} results below {args.min_relevance}% relevance[/dim]\n"
+            )
+
+    if not articles:
+        console.print("[yellow]No relevant results found.[/yellow]\n")
+        return
+
+    keywords = analyzer.find_recurring_keywords(articles, top_n=10)
+    final_count = len(articles)
+
+    combined_text = " ".join([a.get("summary", "") for a in articles])
+    lang = detect_language(combined_text) if args.lang == "auto" else args.lang
+
+    console.print(
+        f"[cyan]→[/cyan] Generating deep summary from {len(ddg_results)} sources + scraped content..."
+    )
+
+    summarizer = get_hf_summarizer()
+    unified_summary, mode = summarizer.generate_deep_research_summary(
+        search_snippets=articles,
+        scraped_content=scraped_content,
+        language=lang,
+        query=query,
+    )
+
+    mode_label = (
+        "[bold green]HF[/bold green]"
+        if mode == "hf"
+        else "[bold yellow]Local[/bold yellow]"
+    )
+    console.print(f"[dim]Using: {mode_label}[/dim]\n")
+
+    print_unified_result(
+        articles,
+        [kw for kw, _ in keywords],
+        unified_summary,
+        theme,
+        mode,
+        source_count=final_count,
+    )
+
+    _last_search_data = {
+        "summary": unified_summary,
+        "query": query,
+        "keywords": [kw for kw, _ in keywords],
+        "source_count": final_count,
+    }
+
+    if cache:
+        cache.set(
+            query=query,
+            articles=articles,
+            summary=unified_summary,
+            summary_mode=mode,
+            relevance_scores={a["title"]: a["relevance_score"] for a in articles},
+            keywords=[kw for kw, _ in keywords],
+        )
+
+    elapsed = time.time() - start_time
+    sys_info = get_system_info()
+    cache_stats = cache.get_stats() if cache else {}
+    console.print(
+        Align.center(
+            get_sticky_footer(
+                sys_info["cpu_percent"], sys_info["memory_mb"], cache_stats, theme
+            )
+        )
+    )
+    console.print(f"\n[dim]Deep research completed in {elapsed:.1f}s[/dim]\n")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="ACHEM - Deep Web Research Tool",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("queries", nargs="*", help="Search terms")
+    parser.add_argument("-l", "--limit", type=int, default=10)
+    parser.add_argument("--lang", choices=["en", "fr", "ar", "auto"], default="auto")
+    parser.add_argument("--no-spell-check", action="store_true")
+    parser.add_argument("--no-filter", action="store_true")
+    parser.add_argument("--no-cache", action="store_true")
+    parser.add_argument("--no-wikipedia", action="store_true", help="Skip Wikipedia")
+    parser.add_argument(
+        "--ddg-limit", type=int, default=30, help="DDG results (default: 30)"
+    )
+    parser.add_argument("--clear-cache", action="store_true")
+    parser.add_argument("--cache-ttl", type=int, default=86400)
+    parser.add_argument(
+        "--min-relevance",
+        type=float,
+        default=0,
+        help="Minimum relevance (0-100). Default: 0 (show all)",
+    )
+
+    args = parser.parse_args()
+
+    if args.queries:
+        terms = []
+        for q in args.queries:
+            terms.extend([t.strip() for t in q.split(",") if t.strip()])
+        print_clear()
+        theme = detect_theme(" ".join(terms)) if terms else ThemeColors.DEFAULT
+        print_logo(theme)
+        process_deep_search(terms, theme, args)
+        return
+
+    while True:
+        clear_screen()
+        print_logo(ThemeColors.DEFAULT)
+        sys_info = get_system_info()
+        console.print(
+            Align.center(
+                get_sticky_footer(
+                    sys_info["cpu_percent"],
+                    sys_info["memory_mb"],
+                    {},
+                    ThemeColors.DEFAULT,
+                )
+            )
+        )
+
+        user_input = get_user_input()
+
+        if user_input is None:
+            break
+
+        raw_input, terms, theme = user_input
+
+        if is_command(raw_input):
+            command = parse_command(raw_input)
+            if command.value == "export":
+                execute_command(command, _last_search_data)
+            else:
+                should_continue = execute_command(command)
+                if not should_continue:
+                    break
+            console.input("\n[dim]Press Enter to continue...[/dim] ")
+            continue
+
+        if not terms:
+            continue
+
+        process_deep_search(terms, theme, args)
+        console.input("\n[dim]Press Enter to continue...[/dim] ")
+
+
+if __name__ == "__main__":
+    main()
