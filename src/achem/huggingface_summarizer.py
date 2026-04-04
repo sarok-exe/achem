@@ -214,31 +214,43 @@ RESPONSE:"""
         Returns:
             Tuple of (summary_text, mode)
         """
-        if not search_snippets:
+        if not search_snippets and not scraped_content:
             return "No search results available.", "local"
 
         if self.is_ai_available():
             success, summary = self._call_hf_api(
                 search_snippets, scraped_content, language, query
             )
-            if success and summary:
+            if success and summary and len(summary) > 50:
                 return summary, "hf"
 
-        return self._generate_local_summary(search_snippets), "local"
+        return self._generate_local_summary(search_snippets, scraped_content), "local"
 
-    def _generate_local_summary(self, snippets: List[dict]) -> str:
-        """Generate local summary from snippets."""
-        if not snippets:
+    def _generate_local_summary(self, snippets: List[dict], scraped_content: str = "") -> str:
+        """Generate local summary from snippets and scraped content."""
+        if not snippets and not scraped_content:
             return "No content available."
 
-        combined = []
-        for item in snippets[:10]:
-            title = item.get("title", "N/A")
-            body = item.get("body", "")
-            if body:
-                combined.append(f"**{title}**: {body}")
+        parts = []
+        
+        if scraped_content:
+            if len(scraped_content) > 500:
+                parts.append(f"## From Scraped Sources:\n{scraped_content[:2000]}...")
+            else:
+                parts.append(f"## From Scraped Sources:\n{scraped_content}")
+        
+        if snippets:
+            combined = []
+            for item in snippets[:8]:
+                title = item.get("title", "N/A")
+                body = item.get("body", "")
+                if body:
+                    combined.append(f"**{title}**: {body[:300]}")
+            
+            if combined:
+                parts.append("## Key Findings:\n" + "\n\n".join(combined))
 
-        return "\n\n".join(combined[:5]) if combined else "Insufficient data."
+        return "\n\n".join(parts) if parts else "Insufficient data."
 
     def generate_summary(
         self, articles: List[dict], language: str = "en", query: str = ""

@@ -23,11 +23,22 @@ class ConfigManager:
     def _load_env(self) -> dict:
         """Load configuration from .env or api.env file."""
         env_config = {}
-        env_path = Path(__file__).parent.parent / "api.env"
-        if not env_path.exists():
-            env_path = Path(__file__).parent.parent / ".env"
+        
+        search_paths = [
+            Path.cwd() / ".env",
+            Path.cwd() / "api.env",
+            Path.home() / ".achem.env",
+            Path(__file__).parent.parent.parent / ".env",
+            Path(__file__).parent.parent.parent / "api.env",
+        ]
+        
+        env_path = None
+        for path in search_paths:
+            if path.exists():
+                env_path = path
+                break
 
-        if env_path.exists():
+        if env_path:
             with open(env_path, "r") as f:
                 for line in f:
                     line = line.strip()
