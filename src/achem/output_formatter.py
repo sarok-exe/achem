@@ -543,7 +543,7 @@ def print_unified_result(
         )
 
     mode_badge = (
-        f"[bold green]HF[/bold green]"
+        f"[bold green]AI[/bold green]"
         if mode == "hf"
         else f"[bold yellow]Local[/bold yellow]"
     )

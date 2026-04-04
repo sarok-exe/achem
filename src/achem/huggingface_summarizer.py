@@ -226,6 +226,14 @@ RESPONSE:"""
 
         return self._generate_local_summary(search_snippets, scraped_content), "local"
 
+    def _strip_urls(self, text: str) -> str:
+        """Remove URLs from text."""
+        import re
+        text = re.sub(r'https?://\S+', '', text)
+        text = re.sub(r'URL:\s*\S+', '', text)
+        text = re.sub(r'\s+', ' ', text).strip()
+        return text
+
     def _generate_local_summary(self, snippets: List[dict], scraped_content: str = "") -> str:
         """Generate local summary from snippets and scraped content."""
         if not snippets and not scraped_content:
@@ -234,16 +242,17 @@ RESPONSE:"""
         parts = []
         
         if scraped_content:
-            if len(scraped_content) > 500:
-                parts.append(f"## From Scraped Sources:\n{scraped_content[:2000]}...")
+            cleaned = self._strip_urls(scraped_content)
+            if len(cleaned) > 500:
+                parts.append(f"## From Scraped Sources:\n{cleaned[:2000]}...")
             else:
-                parts.append(f"## From Scraped Sources:\n{scraped_content}")
+                parts.append(f"## From Scraped Sources:\n{cleaned}")
         
         if snippets:
             combined = []
             for item in snippets[:8]:
                 title = item.get("title", "N/A")
-                body = item.get("body", "")
+                body = self._strip_urls(item.get("body", ""))
                 if body:
                     combined.append(f"**{title}**: {body[:300]}")
             
