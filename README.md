@@ -51,8 +51,10 @@ PASS 2: Scraped full content from top 3 links
 ### Quick Install (PyPI)
 
 ```bash
-pip install achem
+pipx install achem
 ```
+
+> **Note**: `pipx` is recommended as it manages virtual environments automatically. If you prefer pip, use `pip install achem --break-system-packages`.
 
 ### Or Install from Source
 
