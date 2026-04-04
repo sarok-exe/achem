@@ -12,7 +12,7 @@ from typing import List, Optional, Callable, Dict
 import psutil
 import time
 
-console = Console()
+console = Console(width=100, force_terminal=True)
 VERSION = "1.0.0-stable"
 
 
@@ -352,11 +352,11 @@ def get_sticky_footer(
         show_header=False,
         show_edge=False,
         pad_edge=False,
-        padding=(0, 3),
+        padding=(0, 1),
+        min_width=80,
     )
-    footer_table.add_column(justify="left", width=None)
-    footer_table.add_column(justify="right", width=None)
-    footer_table.add_row(version_text, stats_text)
+    footer_table.add_column(justify="center", width=80)
+    footer_table.add_row(f"{version_text}   │   {stats_text}")
 
     return footer_table
 
@@ -536,7 +536,7 @@ def print_unified_result(
 
     mode_badge = (
         f"[bold green]AI[/bold green]"
-        if mode == "hf"
+        if mode in ("hf", "groq", "gemini", "openrouter")
         else f"[bold yellow]Local[/bold yellow]"
     )
     count_display = source_count if source_count is not None else len(articles)

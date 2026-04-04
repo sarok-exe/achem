@@ -24,14 +24,30 @@ class ConfigManager:
         """Load configuration from .env or api.env file."""
         env_config = {}
 
+        current_dir = Path.cwd()
+        home_dir = Path.home()
+
+        try:
+            package_dir = Path(__file__).parent.parent.parent
+        except Exception:
+            package_dir = None
+
         search_paths = [
-            Path.cwd() / ".env",
-            Path.cwd() / "api.env",
-            Path.home() / ".achem.env",
-            Path(__file__).parent.parent.parent / ".env",
-            Path(__file__).parent.parent.parent / "api.env",
-            Path(__file__).parent.parent.parent / "config.json",
+            current_dir / ".env",
+            current_dir / "api.env",
+            home_dir / ".achem.env",
+            home_dir / ".achem" / "api.env",
+            home_dir / ".config" / "achem" / "api.env",
         ]
+
+        if package_dir:
+            search_paths.extend(
+                [
+                    package_dir / ".env",
+                    package_dir / "api.env",
+                    package_dir / "config.json",
+                ]
+            )
 
         env_path = None
         for path in search_paths:
@@ -82,6 +98,34 @@ class ConfigManager:
     def get_hf_model(self) -> str | None:
         """Get HuggingFace model name."""
         return self.get("hf_model")
+
+    def get_groq_api_key(self) -> str | None:
+        """Get Groq API key from configuration."""
+        return self.get("groq_api_key") or self.get("groq_key")
+
+    def get_groq_model(self) -> str | None:
+        """Get Groq model name."""
+        return self.get("groq_model")
+
+    def get_gemini_api_key(self) -> str | None:
+        """Get Gemini API key from configuration."""
+        return (
+            self.get("gemini_api_key")
+            or self.get("gemini_key")
+            or os.environ.get("GEMINI_API_KEY")
+        )
+
+    def get_gemini_model(self) -> str | None:
+        """Get Gemini model name."""
+        return self.get("gemini_model")
+
+    def get_openrouter_api_key(self) -> str | None:
+        """Get OpenRouter API key from configuration."""
+        return self.get("openrouter_api_key") or self.get("openrouter_key")
+
+    def get_openrouter_model(self) -> str | None:
+        """Get OpenRouter model name."""
+        return self.get("openrouter_model")
 
     def is_ai_enabled(self) -> bool:
         """Check if AI summarization is enabled."""

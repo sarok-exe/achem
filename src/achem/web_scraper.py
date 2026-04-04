@@ -6,6 +6,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 
+try:
+    import trafilatura
+
+    TRAFILATURA_AVAILABLE = True
+except ImportError:
+    TRAFILATURA_AVAILABLE = False
+
 EXCLUDE_DOMAINS = {
     "cookie",
     "consent",
@@ -38,17 +45,20 @@ EXCLUDE_PATTERNS = [
 class WebScraper:
     """Web scraper for extracting full content from URLs."""
 
-    def __init__(self, timeout: int = 10, max_content_length: int = 10000):
+    BROWSER_HEADERS = {
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Encoding": "gzip, deflate",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
+    }
+
+    def __init__(self, timeout: int = 15, max_content_length: int = 15000):
         self.timeout = timeout
         self.max_content_length = max_content_length
         self.session = requests.Session()
-        self.session.headers.update(
-            {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.5",
-            }
-        )
+        self.session.headers.update(self.BROWSER_HEADERS)
 
     def should_scrape(self, url: str) -> bool:
         """Check if URL should be scraped."""
@@ -78,36 +88,62 @@ class WebScraper:
             if "text/html" not in content_type:
                 return None
 
-            soup = BeautifulSoup(response.text, "html.parser")
-
-            for tag in soup(
-                ["script", "style", "nav", "footer", "header", "aside", "noscript"]
-            ):
-                tag.decompose()
-
+            html_content = response.text
+            content = ""
             title = ""
-            title_tag = soup.find("title")
-            if title_tag:
-                title = title_tag.get_text().strip()
 
-            article = soup.find("article")
-            if article:
-                content = article.get_text(separator=" ", strip=True)
-            else:
-                main = soup.find("main") or soup.find(
-                    "div", class_=lambda x: x and "content" in x.lower()
+            if TRAFILATURA_AVAILABLE:
+                result = trafilatura.extract(
+                    html_content,
+                    include_tables=True,
+                    include_images=False,
+                    include_comments=False,
+                    output_format="text",
                 )
-                if main:
-                    content = main.get_text(separator=" ", strip=True)
+                if result:
+                    content = result.strip()
+
+                title_result = trafilatura.extract_metadata(html_content)
+                if (
+                    title_result
+                    and hasattr(title_result, "title")
+                    and title_result.title
+                ):
+                    title = title_result.title
+
+            if not content:
+                soup = BeautifulSoup(html_content, "html.parser")
+
+                for tag in soup(
+                    ["script", "style", "nav", "footer", "header", "aside", "noscript"]
+                ):
+                    tag.decompose()
+
+                title_tag = soup.find("title")
+                if title_tag:
+                    title = title_tag.get_text().strip()
+
+                article = soup.find("article")
+                if article:
+                    content = article.get_text(separator=" ", strip=True)
                 else:
-                    body = soup.find("body")
-                    content = body.get_text(separator=" ", strip=True) if body else ""
+                    main = soup.find("main") or soup.find(
+                        "div",
+                        class_=lambda x: x and "content" in x.lower() if x else False,
+                    )
+                    if main:
+                        content = main.get_text(separator=" ", strip=True)
+                    else:
+                        body = soup.find("body")
+                        content = (
+                            body.get_text(separator=" ", strip=True) if body else ""
+                        )
 
             content = " ".join(content.split())
             if len(content) > self.max_content_length:
                 content = content[: self.max_content_length]
 
-            if len(content) < 100:
+            if len(content) < 50:
                 return None
 
             return {

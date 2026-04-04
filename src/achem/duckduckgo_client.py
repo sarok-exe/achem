@@ -64,7 +64,7 @@ class DuckDuckGoClient:
         if not DDGS_AVAILABLE:
             return None
         if self._ddgs is None:
-            self._ddgs = DDGS()
+            self._ddgs = DDGS(proxy=None, timeout=20)
         return self._ddgs
 
     def _should_exclude(self, url: str) -> bool:
@@ -124,6 +124,21 @@ class DuckDuckGoClient:
                             "priority_score": self._get_priority_score(url),
                         }
                     )
+
+            if not all_results:
+                for r in client.text(query, max_results=max_results):
+                    url = r.get("href", "")
+                    if url and url not in seen_urls and "yahoo" not in url.lower():
+                        seen_urls.add(url)
+                        all_results.append(
+                            {
+                                "title": r.get("title", ""),
+                                "body": r.get("body", ""),
+                                "url": url,
+                                "source": "duckduckgo",
+                                "priority_score": self._get_priority_score(url),
+                            }
+                        )
 
             all_results.sort(key=lambda x: x["priority_score"], reverse=True)
 

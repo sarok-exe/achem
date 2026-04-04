@@ -52,3 +52,9 @@ Thumbs.db
 
 # OS Cache
 .wiki-summarizer/
+
+# ACHEM Reports
+~/Documents/ACHEM/
+
+# User config directory (contains API keys)
+.achem/
