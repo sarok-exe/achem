@@ -14,33 +14,6 @@
 - **SQLite Cache**: Instant recall for repeated searches
 - **Export**: Save summaries to Markdown files
 - **Multi-language**: Supports English, French, and Arabic
-
-## Screenshots
-
-```
-╔══════════════════════════════════════════════════════════════════╗
-║                    ACHEM - Deep Web Research                      ║
-╚══════════════════════════════════════════════════════════════════╝
-
-🔍 Deep Research: how to learn python
-==================================================
-PASS 1: Gathering 30 sources from DuckDuckGo...
-✓ Found 30 sources
-PASS 2: Scraped full content from top 3 links
-→ Analyzing 35 total sources...
-→ Generating deep summary...
-
-╭──────────────────────────────────────────────────────────────────╮
-│ UNIFIED RESEARCH SUMMARY                                          │
-├──────────────────────────────────────────────────────────────────┤
-│ 1. Start with the official Python tutorial:                     │
-│    - Visit docs.python.org/3/tutorial                           │
-│                                                                  │
-│ 2. Use free online tutorials:                                   │
-│    - LearnPython.org, pythonbasics.org                         │
-╰──────────────────────────────────────────────────────────────────╯
-```
-
 ## Installation
 
 ### Prerequisites
