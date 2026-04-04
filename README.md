@@ -1,19 +1,19 @@
 # ACHEM - Deep Web Research Tool
 
-![ACHEM Banner](https://img.shields.io/badge/ACHEM-v1.0.4-blue?style=for-the-badge)
+![ACHEM Banner](https://img.shields.io/badge/ACHEM-v1.0.5-blue?style=for-the-badge)
 
-> **ACHEM** (Arabic: آشم) is a powerful deep web research tool that aggregates information from 30+ sources, scrapes full content from top results, and generates concise summaries using AI.
+> **ACHEM** (Arabic: آشم) is a powerful deep web research tool that aggregates information from 100+ sources, scrapes full content from top results using anti-bot bypass techniques, and generates AI-powered summaries.
 
 ## Features
 
-- **Deep Web Research**: Gathers results from 30+ sources via DuckDuckGo
-- **Web Scraping**: Extracts full content from top 3 most relevant links
+- **Deep Web Research**: Gathers results from 100+ sources via DuckDuckGo
+- **Advanced Web Scraping**: Uses Trafilatura + browser headers to bypass bot protection
+- **Multi-AI Providers**: OpenRouter (free), Groq, Gemini, and HuggingFace as fallbacks
 - **Two-Pass Search**: Prioritizes technical content (StackOverflow, GitHub, forums)
-- **AI Summarization**: Uses Hugging Face Inference Providers (free tier)
-- **Syntax Highlighting**: Color-coded output for easy scanning
 - **SQLite Cache**: Instant recall for repeated searches
-- **Export**: Save summaries to Markdown files
+- **Markdown Export**: Auto-saves reports to `~/Documents/ACHEM/`
 - **Multi-language**: Supports English, French, and Arabic
+- **Rate Limit Retry**: Automatic retry on 429 errors
 ## Installation
 
 ### Prerequisites
@@ -31,35 +31,34 @@ pipx install achem
 
 ### Or Install from Source
 
-1. **Clone the repository**
 ```bash
-git clone https://github.com/achem/achem.git
+git clone https://github.com/sarok-exe/achem.git
 cd achem
-```
-
-2. **Install in editable mode**
-```bash
 pip install -e .
 ```
 
-3. **Configure API keys**
+### API Configuration
+
+Create `~/.ACHEM/api.env` or `~/Documents/ACHEM/api.env`:
+
 ```bash
-cp .env.example .env
+# OpenRouter (free, recommended)
+OPENROUTER_API_KEY=your_openrouter_key_here
+OPENROUTER_MODEL=qwen/qwen3.6-plus:free
+AI_ENABLED=true
+
+# Or use other providers:
+# GROQ_API_KEY=your_groq_key
+# GEMINI_API_KEY=your_gemini_key
+# HF_API_KEY=your_huggingface_key
 ```
 
-Then edit `.env` and add your Hugging Face API token:
-```env
-HF_API_KEY=hf_your_token_here
-HF_MODEL=Qwen/Qwen2.5-7B-Instruct
-```
+#### Getting an API Key
 
-### Getting a Hugging Face API Token
-
-1. Go to [Hugging Face](https://huggingface.co/)
-2. Create an account (free)
-3. Go to Settings → Access Tokens
-4. Create a new token with "Read" permissions
-5. Copy the token to your `.env` file
+- **OpenRouter** (free): https://openrouter.ai/settings
+- **Groq**: https://console.groq.com/keys
+- **Gemini**: https://aistudio.google.com/app/apikey
+- **HuggingFace**: https://huggingface.co/settings/access-tokens
 
 ## Usage
 
@@ -108,15 +107,17 @@ ACHEM/
 │       ├── commands.py    # Command handler
 │       ├── config_manager.py    # Config loader
 │       ├── duckduckgo_client.py # DDG search
-│       ├── export_manager.py    # Export to Documents/ACHEM/
-│       ├── huggingface_summarizer.py # AI summarization
+│       ├── huggingface_summarizer.py  # HuggingFace AI
+│       ├── openrouter_summarizer.py  # OpenRouter AI (free)
+│       ├── groq_summarizer.py   # Groq AI
+│       ├── gemini_summarizer.py # Gemini AI
 │       ├── output_formatter.py # Terminal UI
 │       ├── search_router.py    # Source priority
 │       ├── sqlite_cache.py     # SQLite cache
 │       ├── spell_checker.py    # Typo correction
 │       ├── text_analyzer.py    # TF-IDF analysis
 │       ├── user_input.py       # Input handler
-│       ├── web_scraper.py      # BeautifulSoup scraper
+│       ├── web_scraper.py      # Trafilatura + BeautifulSoup
 │       └── wikipedia_client.py  # Wikipedia API
 ├── .env.example            # Config template
 ├── .gitignore
@@ -131,29 +132,33 @@ ACHEM/
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│ PASS 1: DuckDuckGo Search (30 results)              │
+│ PASS 1: DuckDuckGo Search (100 sources)             │
 │ • Prioritizes technical sites                        │
 │ • Filters out cookie/login/consent pages            │
-│ • Ranks by domain authority                         │
+│ • Ranks by relevance score                         │
 ├─────────────────────────────────────────────────────┤
-│ PASS 2: Web Scraping (Top 3)                        │
-│ • BeautifulSoup extracts full article text           │
-│ • Removes navigation/footer/scripts                 │
-│ • Combines up to 10,000 chars per article           │
+│ PASS 2: Web Scraping (Top 15)                       │
+│ • Uses browser headers to bypass bot detection      │
+│ • Trafilatura extracts main content                │
+│ • Falls back to BeautifulSoup if needed            │
+│ • Combines up to 15,000 chars per article          │
 ├─────────────────────────────────────────────────────┤
 │ PASS 3: AI Summarization                            │
-│ • Neutral technical prompt                           │
+│ • Priority: OpenRouter → Groq → Gemini → HF         │
+│ • Neutral technical prompt                         │
 │ • No ethical warnings or opinions                   │
 │ • 500-4000 character output                        │
-│ • Syntax highlighting for steps/commands             │
+│ • Retry on rate limit (429)                        │
 └─────────────────────────────────────────────────────┘
 ```
 
 ### Source Priority
 
-1. **DuckDuckGo** (Primary) - Real-time web results
-2. **Wikipedia** (Secondary) - Background concepts only
-3. **Web Scraping** - Full content from top 3
+1. **OpenRouter** (free models like Qwen, GPT-oss)
+2. **Groq** (fast inference)
+3. **Gemini** (Google AI)
+4. **HuggingFace** (fallback)
+5. **Local** (if all APIs fail)
 
 ## Export Location
 
@@ -177,7 +182,10 @@ Contributions are welcome! Please feel free to submit issues and pull requests.
 
 ## Acknowledgments
 
-- [Hugging Face](https://huggingface.co/) - Free inference API
+- [OpenRouter](https://openrouter.ai/) - Free AI models
+- [Groq](https://groq.com/) - Fast AI inference
+- [Google Gemini](https://gemini.google.com/) - AI powered by Google
+- [HuggingFace](https://huggingface.co/) - AI models & inference
 - [DuckDuckGo](https://duckduckgo.com/) - Privacy-focused search
 - [Wikipedia](https://www.wikipedia.org/) - Free encyclopedia
-- [Qwen](https://huggingface.co/Qwen) - Open source AI models
+- [Trafilatura](https://trafilatura.readthedocs.io/) - Web content extraction
