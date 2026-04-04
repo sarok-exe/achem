@@ -2,7 +2,7 @@
 # ACHEM Runner Script
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV_DIR="$SCRIPT_DIR/.achem-venv"
+VENV_DIR="$SCRIPT_DIR/venv"
 
 if [ ! -d "$VENV_DIR" ]; then
     echo "Creating virtual environment..."
@@ -11,4 +11,4 @@ fi
 
 source "$VENV_DIR/bin/activate"
 pip install -q -e "$SCRIPT_DIR" 2>/dev/null
-achem "$@"
+python -m achem "$@"
