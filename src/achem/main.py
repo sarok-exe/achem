@@ -245,7 +245,9 @@ def process_deep_search(terms: list[str], theme, args):
             )
         )
     )
-    console.print(f"\n[dim]Deep research completed in {elapsed:.1f}s[/dim]\n")
+    console.print(
+        f"\n[dim]{'Deep research completed in ' + str(round(elapsed, 1)) + 's':^80}[/dim]\n"
+    )
 
 
 def main():
