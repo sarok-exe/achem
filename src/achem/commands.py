@@ -114,4 +114,4 @@ def print_version():
     """Print version info."""
     from .output_formatter import VERSION
 
-    print(f"\n📦 ACHEM v{VERSION}\n")
+    print(f"\nACHEM v{VERSION}\n")

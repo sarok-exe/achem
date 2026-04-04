@@ -121,7 +121,7 @@ class WebScraper:
             logging.debug(f"Failed to scrape {url}: {e}")
             return None
 
-    def scrape_batch(self, urls: List[str], max_workers: int = 3) -> List[Dict]:
+    def scrape_batch(self, urls: List[str], max_workers: int = 5) -> List[Dict]:
         """Scrape multiple URLs in parallel."""
         results = []
 

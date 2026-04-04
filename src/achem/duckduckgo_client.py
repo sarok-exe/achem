@@ -55,7 +55,7 @@ TECHNICAL_PRIORITY_DOMAINS = {
 class DuckDuckGoClient:
     """DuckDuckGo search client for fast web results - Deep Research Mode."""
 
-    def __init__(self, max_results: int = 30):
+    def __init__(self, max_results: int = 50):
         self.max_results = max_results
         self._ddgs = None
 
@@ -162,7 +162,7 @@ class DuckDuckGoClient:
         def search_single(q):
             return self.search(q, max_results=max_per_query)
 
-        with ThreadPoolExecutor(max_workers=5) as executor:
+        with ThreadPoolExecutor(max_workers=10) as executor:
             futures = {executor.submit(search_single, q): q for q in queries}
             for future in as_completed(futures):
                 try:

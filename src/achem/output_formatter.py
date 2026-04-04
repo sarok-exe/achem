@@ -343,8 +343,7 @@ def get_sticky_footer(
         if hits + misses > 0:
             cache_str = f"  [blue]Cache: {hits}/{hits + misses}[/blue]"
 
-    version_text = f"[bold {accent}]v{VERSION}[/bold {accent}] ● [green]online[/green]"
-    shortcuts_text = f"[yellow]F1[/yellow] Help  [yellow]ESC[/yellow] Exit"
+    version_text = f"[bold {accent}]v{VERSION}[/bold {accent}]"
     stats_text = (
         f"[green]CPU: {cpu:.1f}%[/green]  [yellow]RAM: {ram:.0f}MB[/yellow]{cache_str}"
     )
@@ -356,9 +355,8 @@ def get_sticky_footer(
         padding=(0, 3),
     )
     footer_table.add_column(justify="left", width=None)
-    footer_table.add_column(justify="center", width=None)
     footer_table.add_column(justify="right", width=None)
-    footer_table.add_row(version_text, shortcuts_text, stats_text)
+    footer_table.add_row(version_text, stats_text)
 
     return footer_table
 
@@ -474,13 +472,7 @@ def print_results(
     glow = theme["glow"]
 
     console.print()
-    console.print(
-        Panel.fit(
-            f"[bold {glow}]SEARCH RESULTS[/bold {glow}]",
-            style=primary,
-            border_style=primary,
-        )
-    )
+    console.print(f"[bold {glow}]SEARCH RESULTS[/bold {glow}]")
     console.print()
 
     for i, article in enumerate(articles, 1):
@@ -504,8 +496,8 @@ def print_results(
         console.print()
 
     if unified_summary:
-        console.print(f"[bold {glow}]📝 Unified Summary:[/bold {glow}]")
-        console.print(Panel(unified_summary, border_style=primary))
+        console.print(f"[bold {glow}]Unified Summary:[/bold {glow}]")
+        console.print(unified_summary)
 
 
 def print_unified_result(
@@ -535,7 +527,7 @@ def print_unified_result(
         kw_text = "  ".join([f"[{primary}]{kw}[/{primary}]" for kw in keywords[:8]])
 
     result_lines = []
-    result_lines.append(f"[bold {glow}]📄 {best_title} {rel_text}[/bold {glow}]")
+    result_lines.append(f"[bold {glow}] {best_title} {rel_text}[/bold {glow}]")
 
     if best_relevance < 50:
         result_lines.append(
@@ -559,24 +551,8 @@ def print_unified_result(
             display_summary = highlight_summary_keywords(unified_summary, glow)
         result_lines.append(display_summary)
 
-    title_text = f"[bold {glow}]UNIFIED RESEARCH SUMMARY[/bold {glow}]"
-
-    title_panel = Panel.fit(
-        title_text,
-        style=primary,
-        border_style=primary,
-    )
-
-    result_panel = Panel(
-        "\n".join(result_lines),
-        border_style=primary,
-        padding=(0, 1),
-        width=min(get_terminal_width() - 4, 100),
-    )
-
     console.print()
-    console.print(Align.center(title_panel))
-    console.print(Align.center(result_panel))
+    console.print("\n".join(result_lines))
     console.print()
 
 

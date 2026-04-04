@@ -1,6 +1,6 @@
 """ACHEM - Deep Web Research Tool
 
-A powerful CLI tool for aggregating information from 30+ sources,
+A powerful CLI tool for aggregating information from 50+ sources,
 scraping full content, and generating AI-powered summaries.
 """
 

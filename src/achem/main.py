@@ -44,69 +44,25 @@ def detect_language(text: str) -> str:
 
 
 def process_deep_search(terms: list[str], theme, args):
-    """Two-Pass Deep Web Research: Pass 1 = 30 links, Pass 2 = Scrape top 3."""
-    global _last_search_data
-    start_time = time.time()
-
-    if not args.no_spell_check:
-        spell_checker = SpellChecker()
-        corrected = []
-        for term in terms:
-            c, _ = spell_checker.correct(term)
-            corrected.append(c)
-        terms = corrected
-
+    """Two-Pass Deep Web Research: Unlimited sources."""
+    priority_config = get_source_priority()
+    ddg_limit = args.ddg_limit if args.ddg_limit else 100
+    scrape_top = 10
     query = " ".join(terms)
-    console.print(f"\n🔍 Deep Research: {query}")
-    console.print("=" * 50)
+    start_time = time.time()
 
     cache = None
     if not args.no_cache:
         cache = get_sqlite_cache(ttl_seconds=args.cache_ttl)
-        if args.clear_cache:
-            cache.invalidate()
-            console.print("[dim]Cache cleared[/dim]")
 
-        cached = cache.get(query)
-        if cached:
-            console.print("[green]📦 Loaded from cache (0.1s)[/green]\n")
-            keywords = cached.get("keywords", [])
-            final_count = len(cached.get("articles", []))
-
-            print_unified_result(
-                cached.get("articles", []),
-                keywords,
-                cached.get("summary", ""),
-                theme,
-                cached.get("summary_mode", "local"),
-                source_count=final_count,
-            )
-
-            _last_search_data = {
-                "summary": cached.get("summary", ""),
-                "query": query,
-                "keywords": keywords,
-                "source_count": final_count,
-            }
-
-            elapsed = time.time() - start_time
-            console.print(
-                f"\n[dim]Research completed in {elapsed:.1f}s (cached)[/dim]\n"
-            )
-            return
-
-    priority_config = get_source_priority()
-    ddg_limit = args.ddg_limit or priority_config.get("total_results", 30)
-    scrape_top = priority_config.get("scraping_targets", 3)
-
-    console.print(f"[cyan]PASS 1:[/cyan] Gathering 30 sources from DuckDuckGo...")
+    console.print(f"[cyan]PASS 1:[/cyan] Gathering sources from DuckDuckGo...")
 
     ddg_client = get_ddg_client(max_results=ddg_limit)
     ddg_results, scraped_content = ddg_client.search_with_scrape(
         query, max_results=ddg_limit, scrape_top=scrape_top
     )
 
-    console.print(f"[green]✓[/green] Found {len(ddg_results)} sources")
+    console.print(f"[green]Found {len(ddg_results)} sources")
 
     if scraped_content:
         console.print(
@@ -227,7 +183,7 @@ def main():
     parser.add_argument("--no-cache", action="store_true")
     parser.add_argument("--no-wikipedia", action="store_true", help="Skip Wikipedia")
     parser.add_argument(
-        "--ddg-limit", type=int, default=30, help="DDG results (default: 30)"
+        "--ddg-limit", type=int, default=100, help="DDG results (default: 100)"
     )
     parser.add_argument("--clear-cache", action="store_true")
     parser.add_argument("--cache-ttl", type=int, default=86400)
@@ -280,14 +236,22 @@ def main():
                 should_continue = execute_command(command)
                 if not should_continue:
                     break
-            console.input("\n[dim]Press Enter to continue...[/dim] ")
+            try:
+                console.input("\n[dim]Press Enter to continue...[/dim] ")
+            except KeyboardInterrupt:
+                console.print("\n[dim]Exiting...[/dim]")
+                break
             continue
 
         if not terms:
             continue
 
         process_deep_search(terms, theme, args)
-        console.input("\n[dim]Press Enter to continue...[/dim] ")
+        try:
+            console.input("\n[dim]Press Enter to continue...[/dim] ")
+        except KeyboardInterrupt:
+            console.print("\n[dim]Exiting...[/dim]")
+            break
 
 
 if __name__ == "__main__":

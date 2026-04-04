@@ -56,6 +56,6 @@ def get_source_priority() -> dict:
     return {
         "primary": "duckduckgo",
         "secondary": "wikipedia",
-        "scraping_targets": 3,
-        "total_results": 30,
+        "scraping_targets": 5,
+        "total_results": 50,
     }
