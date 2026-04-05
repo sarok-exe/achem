@@ -33,6 +33,7 @@ class ConfigManager:
             package_dir = None
 
         search_paths = [
+            home_dir / ".achem" / "api.env",
             current_dir / ".env",
             current_dir / "api.env",
             home_dir / ".achem.env",
