@@ -2,37 +2,37 @@
 """ACHEM - Deep Web Research Tool"""
 
 import sys
+import re
 import argparse
-import os
 import time
+import asyncio
 from datetime import datetime
 from pathlib import Path
 
-from .user_input import get_user_input
 from .wikipedia_client import WikipediaClient
 from .duckduckgo_client import get_ddg_client
-from .search_router import detect_search_sources, get_source_priority
 from .text_analyzer import TextAnalyzer
+from .context_classifier import classify_and_filter
+from .positional_ranker import PositionalRanker, rank_by_structure
 from .huggingface_summarizer import get_hf_summarizer
 from .groq_summarizer import get_groq_summarizer
 from .gemini_summarizer import get_gemini_summarizer
 from .openrouter_summarizer import get_openrouter_summarizer
-from .spell_checker import SpellChecker
-from .commands import is_command, parse_command, execute_command, clear_screen
+from .local_summarizer import get_local_summarizer
 from .sqlite_cache import get_sqlite_cache
 from .output_formatter import (
-    print_logo,
-    print_unified_result,
-    get_sticky_footer,
-    print_clear,
     console,
     detect_theme,
     ThemeColors,
-    Align,
+    c,
+    print_unified_result,
+    print_clear,
     get_system_info,
+    get_footer,
 )
 
 _last_search_data = {}
+_tui_app = None
 
 
 def save_markdown_report(
@@ -42,12 +42,10 @@ def save_markdown_report(
     output_dir = Path.home() / "Documents" / "ACHEM"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    safe_query = "".join(c for c in query if c.isalnum() or c in " -").replace(
+    safe_query = "".join(ch for ch in query if ch.isalnum() or ch in " -").replace(
         " ", "_"
     )[:50]
-    filename = f"{safe_query}.md"
-    filepath = output_dir / filename
+    filepath = output_dir / f"{safe_query}.md"
 
     existing = list(output_dir.glob(f"{safe_query}*.md"))
     if existing:
@@ -92,8 +90,9 @@ def save_markdown_report(
 
 
 def detect_language(text: str) -> str:
-    arabic_chars = sum(1 for c in text if "\u0600" <= c <= "\u06ff")
-    french_chars = sum(1 for c in text if c in "àâäéèêëïîôùûüçÀÂÄÉÈÊËÏÎÔÙÛÜÇ")
+    french_chars_set = set("àâäéèêëïîôùûüçÀÂÄÉÈÊËÏÎÔÙÛÜÇ")
+    arabic_chars = sum(1 for ch in text if "\u0600" <= ch <= "\u06ff")
+    french_chars = sum(1 for ch in text if ch in french_chars_set)
     total = len(text)
     if total == 0:
         return "en"
@@ -104,11 +103,129 @@ def detect_language(text: str) -> str:
     return "en"
 
 
-def process_deep_search(terms: list[str], theme, args):
-    """Two-Pass Deep Web Research: Unlimited sources."""
-    priority_config = get_source_priority()
+def show_loading(console_obj, status: str, sources: list = None):
+    """Progress output with spinner and details."""
+    print_clear()
+
+    spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    import time
+
+    frame = int(time.time() * 10) % len(spinner)
+
+    console_obj.print()
+    console_obj.print(
+        f"  [{c('accent_blue')}]{spinner[frame]} {status}[/{c('accent_blue')}]"
+    )
+
+    if sources:
+        console_obj.print(f"  [{c('yellow')}]┄┄┄┄┄┄┄┄┄┄┄┄┄┄[/{c('yellow')}]")
+        for s in sources[:8]:
+            console_obj.print(
+                f"  [{c('green')}]├[/{c('green')}] [{c('overlay0')}]{s[:55]}[/{c('overlay0')}]"
+            )
+        if len(sources) > 8:
+            console_obj.print(
+                f"  [{c('green')}]├[/{c('green')}] [{c('overlay0')}]... +{len(sources) - 8} more[/{c('overlay0')}]"
+            )
+
+    console_obj.print(f"  [{c('red')}]Ctrl+C[/{c('red')}] to cancel")
+    console_obj.print()
+
+
+def generate_local_summary(articles: list, query: str, keywords: list) -> str:
+    """Generate summary using TF-IDF extractive algorithm (no AI)."""
+    if not articles:
+        return "No articles to summarize."
+
+    analyzer = TextAnalyzer()
+    all_text = ""
+
+    for article in articles:
+        text = article.get("body", "") or article.get("summary", "")
+        if text and len(text) > 50:
+            all_text += " " + text
+
+    if not all_text.strip():
+        summaries = []
+        for a in articles[:5]:
+            s = a.get("summary", a.get("title", ""))
+            if s:
+                summaries.append(s)
+        if summaries:
+            all_text = " ".join(summaries)
+
+    if not all_text.strip():
+        return f"Research on '{query}' found {len(articles)} sources but content was unavailable."
+
+    sentences = re.split(r"[.!?]+", all_text)
+    sentence_scores = {}
+
+    for sent in sentences:
+        sent = sent.strip()
+        if len(sent) < 30:
+            continue
+
+        score = 0
+        for kw, _ in keywords[:8]:
+            if kw.lower() in sent.lower():
+                score += 3
+
+        sent_words = set(analyzer.tokenize(sent.lower()))
+        for kw, _ in keywords:
+            if kw.lower() in sent_words:
+                score += 1
+
+        sentence_scores[sent] = score
+
+    if not sentence_scores:
+        key_topics = ", ".join([k for k, _ in keywords[:5]])
+        return f"Based on {len(articles)} sources about '{query}'.\n\n**Key Topics:** {key_topics}"
+
+    top_sentences = sorted(sentence_scores.items(), key=lambda x: x[1], reverse=True)[
+        :6
+    ]
+
+    summary_parts = []
+    for sent, _ in sorted(top_sentences, key=lambda x: -len(x[0])):
+        sent = sent.strip()
+        if sent and sent not in summary_parts:
+            summary_parts.append(sent + ".")
+            if len(summary_parts) >= 4:
+                break
+
+    summary = " ".join(summary_parts[:4])
+    key_topics = ", ".join([k for k, _ in keywords[:6]])
+
+    return f"{summary}\n\n**Key Topics:** {key_topics}\n\n**Sources:** {len(articles)} articles analyzed"
+
+
+TRUSTED_SOURCES = [
+    "wikipedia.org",
+    "wikimedia.org",
+    "cnn.com",
+    "bbc.com",
+    "reuters.com",
+    "apnews.com",
+    "nytimes.com",
+    "theguardian.com",
+    "nasa.gov",
+    "nih.gov",
+    "edu",
+    "gov",
+]
+
+
+def is_trusted_source(url: str) -> bool:
+    """Check if URL is from a trusted source."""
+    url_lower = url.lower()
+    return any(src in url_lower for src in TRUSTED_SOURCES)
+
+
+def process_deep_search(terms: list[str], theme, args, show_loading_ui=False):
+    """Deep Web Research - local or AI mode."""
+    mode = getattr(args, "mode", "ai")
     ddg_limit = args.ddg_limit if args.ddg_limit else 100
-    scrape_top = 15
+    scrape_top = 10
     query = " ".join(terms)
     start_time = time.time()
 
@@ -116,55 +233,127 @@ def process_deep_search(terms: list[str], theme, args):
     if not args.no_cache:
         cache = get_sqlite_cache(ttl_seconds=args.cache_ttl)
 
-    console.print(f"[cyan]PASS 1:[/cyan] Gathering sources from DuckDuckGo...")
-
-    ddg_client = get_ddg_client(max_results=ddg_limit)
-    ddg_results, scraped_content = ddg_client.search_with_scrape(
-        query, max_results=ddg_limit, scrape_top=scrape_top
+    show_loading(
+        console,
+        f"[{c('green')}]LOCAL[/{c('green')}] Searching: {query[:35]}..."
+        if mode == "local"
+        else f"Searching: {query[:40]}...",
     )
 
-    console.print(f"[green]Found {len(ddg_results)} sources")
+    ddg_client = get_ddg_client(max_results=ddg_limit)
 
-    if scraped_content:
-        console.print(
-            f"[cyan]PASS 2:[/cyan] Scraped full content from top {scrape_top} links"
-        )
+    show_loading(console, "Searching DuckDuckGo...", [])
+    ddg_results = ddg_client.search(query, max_results=ddg_limit)
+
+    sources = [r.get("title", "Unknown")[:50] for r in ddg_results[:8]]
+    show_loading(
+        console, f"Found {len(ddg_results)} results. Scraping content...", sources
+    )
+
+    from .web_scraper import get_scraper
+
+    scraper = get_scraper()
+
+    urls_to_scrape = [
+        r.get("url", "") for r in ddg_results[:scrape_top] if r.get("url")
+    ]
+    scraped_results = scraper.scrape_batch(urls_to_scrape)
+
+    scraped_content = ""
+    if scraped_results:
+        for item in scraped_results:
+            scraped_content += f"\n\n=== {item['title']} ===\n{item['content'][:3000]}"
+
+    show_loading(console, f"Scraped {len(scraped_results)} pages. Analyzing...", [])
+    time.sleep(0.2)
+
+    scraped_urls = {item["url"]: item["content"] for item in scraped_results}
 
     articles = []
     for r in ddg_results:
+        url = r.get("url", "")
+        is_trusted = is_trusted_source(url)
+        scraped_text = scraped_urls.get(url, "")
+
+        summary = r.get("body", "") or scraped_text[:500]
+        body = scraped_text if scraped_text else r.get("body", "")
+
         articles.append(
             {
                 "title": r.get("title", "Unknown"),
-                "summary": r.get("body", ""),
-                "url": r.get("url", ""),
-                "source": "duckduckgo",
-                "relevance_score": 50 + r.get("priority_score", 0),
+                "summary": summary,
+                "body": body,
+                "url": url,
+                "source": "trusted" if is_trusted else "duckduckgo",
+                "relevance_score": 70
+                if is_trusted
+                else 50 + r.get("priority_score", 0),
             }
         )
 
     if not args.no_wikipedia:
-        console.print(f"[cyan]+[/cyan] Adding Wikipedia as secondary reference...")
+        show_loading(console, "Adding Wikipedia references...", [])
         wiki_client = WikipediaClient(use_cache=False)
         wiki_articles = wiki_client.get_articles_for_queries(terms, limit_per_query=5)
         for article in wiki_articles:
             article["source"] = "wikipedia"
-            article["relevance_score"] = 30
+            article["relevance_score"] = 80
         articles.extend(wiki_articles)
+        time.sleep(0.2)
 
-    console.print(f"[cyan]→[/cyan] Analyzing {len(articles)} total sources...\n")
+    if mode == "local":
+        show_loading(console, "Filtering trusted sources...", [])
+        articles = [a for a in articles if a["source"] in ("wikipedia", "trusted")]
+        time.sleep(0.2)
 
+    show_loading(console, "Filtering by context...", [])
+    articles, filtered = classify_and_filter(articles, query, threshold=15)
+    if filtered:
+        console.print(
+            f"  [{c('overlay0')}]Filtered {len(filtered)} noise sources[/{c('overlay0')}]"
+        )
+
+    show_loading(console, "Calculating Ordinal Distance...", [])
+    positional_ranker = PositionalRanker()
+    target_word = positional_ranker.extract_target_word(query)
+    if target_word:
+        from .positional_ranker import OrdinalDistanceCalculator
+
+        calc = OrdinalDistanceCalculator()
+        query_pattern = calc.calculate_ordinal_pattern(query, target_word)
+
+        articles = positional_ranker.rank_results(articles, query)
+
+        if articles:
+            avg_dist = sum(a.get("ordinal_distance", 0) for a in articles) / len(
+                articles
+            )
+            min_dist = min(a.get("ordinal_distance", 999) for a in articles)
+            best = articles[0]
+            best_dist = best.get("ordinal_distance", 0)
+
+            console.print(
+                f"  [{c('accent_blue')}]Target: '[bold]{target_word}[/bold]' @ pos {query_pattern.target_position + 1}[/{c('accent_blue')}]"
+            )
+            console.print(
+                f"  [{c('green')}]Best match: pos {best.get('title_target_pos', 0) + 1}, dist={best_dist:.0f}[/{c('green')}]"
+            )
+    time.sleep(0.1)
+
+    show_loading(console, f"Analyzing {len(articles)} sources...", [])
     analyzer = TextAnalyzer()
     articles = analyzer.score_articles_with_relevance(articles, terms)
+    time.sleep(0.2)
 
     if args.min_relevance > 0:
         articles, removed = analyzer.filter_by_relevance(articles, args.min_relevance)
         if removed:
             console.print(
-                f"[dim]Filtered {len(removed)} results below {args.min_relevance}% relevance[/dim]\n"
+                f"[{c('overlay0')}]Filtered {len(removed)} results below {args.min_relevance}% relevance[/{c('overlay0')}]\n"
             )
 
     if not articles:
-        console.print("[yellow]No relevant results found.[/yellow]\n")
+        console.print(f"[{c('yellow')}]No relevant results found.[/{c('yellow')}]\n")
         return
 
     keywords = analyzer.find_recurring_keywords(articles, top_n=10)
@@ -173,46 +362,66 @@ def process_deep_search(terms: list[str], theme, args):
     combined_text = " ".join([a.get("summary", "") for a in articles])
     lang = detect_language(combined_text) if args.lang == "auto" else args.lang
 
-    console.print(
-        f"[cyan]→[/cyan] Generating deep summary from {len(ddg_results)} sources + scraped content..."
-    )
-
-    openrouter_summarizer = get_openrouter_summarizer()
-    groq_summarizer = get_groq_summarizer()
-    gemini_summarizer = get_gemini_summarizer()
-
-    if openrouter_summarizer.is_ai_available():
-        summarizer = openrouter_summarizer
-    elif groq_summarizer.is_ai_available():
-        summarizer = groq_summarizer
-    elif gemini_summarizer.is_ai_available():
-        summarizer = gemini_summarizer
+    if mode == "local":
+        show_loading(console, "Generating summary (TF-IDF)...", [])
+        unified_summary = generate_local_summary(articles, query, keywords)
+        result_mode = "local"
+    elif mode == "ollama":
+        show_loading(console, "Generating AI summary (Local Ollama)...", [])
+        local_summarizer = get_local_summarizer()
+        if local_summarizer.is_ai_available():
+            unified_summary, result_mode = local_summarizer.generate_summary(
+                articles=articles,
+                language=lang,
+                query=query,
+            )
+        else:
+            console.print(
+                f"  [{c('yellow')}]Ollama not running. Starting AI search...[/]"
+            )
+            mode = "ai"
     else:
-        summarizer = get_hf_summarizer()
+        show_loading(console, "Generating AI summary...", [])
+        openrouter_summarizer = get_openrouter_summarizer()
+        groq_summarizer = get_groq_summarizer()
+        gemini_summarizer = get_gemini_summarizer()
 
-    unified_summary, mode = summarizer.generate_deep_research_summary(
-        search_snippets=articles,
-        scraped_content=scraped_content,
-        language=lang,
-        query=query,
-    )
+        if openrouter_summarizer.is_ai_available():
+            summarizer = openrouter_summarizer
+        elif groq_summarizer.is_ai_available():
+            summarizer = groq_summarizer
+        elif gemini_summarizer.is_ai_available():
+            summarizer = gemini_summarizer
+        else:
+            local_summarizer = get_local_summarizer()
+            if local_summarizer.is_ai_available():
+                summarizer = local_summarizer
+            else:
+                summarizer = get_hf_summarizer()
 
-    mode_label = (
-        "[bold green]AI[/bold green]"
-        if mode in ("hf", "groq", "gemini", "openrouter")
-        else "[bold yellow]Local[/bold yellow]"
-    )
-    console.print(f"[dim]Using: {mode_label}[/dim]\n")
+        unified_summary, result_mode = summarizer.generate_deep_research_summary(
+            search_snippets=articles,
+            scraped_content=scraped_content,
+            language=lang,
+            query=query,
+        )
 
+    show_loading(console, "Finalizing results...", [])
+    time.sleep(0.2)
+
+    mode_label = f"[bold {c('green')}]{mode.upper()}[/bold {c('green')}]"
+
+    print_clear()
     print_unified_result(
         articles,
         [kw for kw, _ in keywords],
         unified_summary,
         theme,
-        mode,
+        result_mode,
         source_count=final_count,
     )
 
+    global _last_search_data
     _last_search_data = {
         "summary": unified_summary,
         "query": query,
@@ -225,54 +434,134 @@ def process_deep_search(terms: list[str], theme, args):
             query=query,
             articles=articles,
             summary=unified_summary,
-            summary_mode=mode,
+            summary_mode=result_mode,
             relevance_scores={a["title"]: a["relevance_score"] for a in articles},
             keywords=[kw for kw, _ in keywords],
+            full_content=scraped_content,
         )
 
     markdown_path = save_markdown_report(
-        query, unified_summary, articles, [kw for kw, _ in keywords], mode
+        query, unified_summary, articles, [kw for kw, _ in keywords], result_mode
     )
-    console.print(f"[dim]Report saved to: {markdown_path}[/dim]\n")
+    console.print(
+        f"[{c('overlay0')}]Report saved to: {markdown_path}[/{c('overlay0')}]\n"
+    )
 
     elapsed = time.time() - start_time
     sys_info = get_system_info()
     cache_stats = cache.get_stats() if cache else {}
     console.print(
-        Align.center(
-            get_sticky_footer(
-                sys_info["cpu_percent"], sys_info["memory_mb"], cache_stats, theme
-            )
-        )
+        get_footer(sys_info["cpu_percent"], sys_info["memory_mb"], cache_stats)
     )
     console.print(
-        f"\n[dim]{'Deep research completed in ' + str(round(elapsed, 1)) + 's':^80}[/dim]\n"
+        f"\n[{c('overlay0')}]Research completed in {round(elapsed, 1)}s ({mode_label})[/{c('overlay0')}]\n"
     )
+
+
+def handle_followup(question: str, cached_data: dict, mode: str) -> str:
+    """Handle follow-up question using cached data."""
+    articles = cached_data.get("articles", [])
+    full_content = cached_data.get("full_content", "")
+    keywords = cached_data.get("keywords", [])
+
+    combined_context = ""
+
+    for article in articles[:10]:
+        title = article.get("title", "")
+        body = article.get("body", article.get("summary", ""))
+        if body:
+            combined_context += f"- {body[:300]}\n"
+
+    if full_content:
+        combined_context += f"\n--- Extended Content ---\n{full_content[:3000]}"
+
+    if not combined_context:
+        return "No additional context available for follow-up questions."
+
+    if mode == "ai":
+        try:
+            groq = get_groq_summarizer()
+            openrouter = get_openrouter_summarizer()
+            gemini = get_gemini_summarizer()
+
+            if groq.is_ai_available():
+                summarizer = groq
+            elif openrouter.is_ai_available():
+                summarizer = openrouter
+            elif gemini.is_ai_available():
+                summarizer = gemini
+            else:
+                return generate_local_followup(question, articles, keywords)
+
+            answer, _ = summarizer.generate_deep_research_summary(
+                search_snippets=articles,
+                scraped_content=combined_context,
+                language="en",
+                query=question,
+            )
+            return answer
+        except Exception:
+            pass
+
+    return generate_local_followup(question, articles, keywords)
+
+
+def generate_local_followup(question: str, articles: list, keywords: list) -> str:
+    """Generate follow-up answer using local TF-IDF."""
+    question_lower = question.lower()
+    question_words = set(re.findall(r"\w+", question_lower))
+
+    relevant_parts = []
+
+    for article in articles:
+        body = article.get("body", article.get("summary", ""))
+        if not body:
+            continue
+
+        score = 0
+        for word in question_words:
+            if len(word) < 3:
+                continue
+            if word in body.lower():
+                score += 5
+
+        if score > 0:
+            sentences = re.split(r"[.!?]+", body)
+            for sent in sentences:
+                sent = sent.strip()
+                if len(sent) < 20:
+                    continue
+                if any(w in sent.lower() for w in question_words if len(w) > 2):
+                    relevant_parts.append((sent, score))
+
+    relevant_parts.sort(key=lambda x: x[1], reverse=True)
+
+    if not relevant_parts:
+        return "I couldn't find specific information about that in the sources."
+
+    answer_parts = [p[0].capitalize() + "." for p, _ in relevant_parts[:3]]
+    return " ".join(answer_parts)
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="ACHEM - Deep Web Research Tool",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
+    parser = argparse.ArgumentParser(description="ACHEM - Deep Web Research Tool")
     parser.add_argument("queries", nargs="*", help="Search terms")
     parser.add_argument("-l", "--limit", type=int, default=10)
+    parser.add_argument(
+        "--mode",
+        choices=["local", "ai", "ollama"],
+        default="ai",
+        help="local: TF-IDF, ai: cloud AI, ollama: local AI",
+    )
     parser.add_argument("--lang", choices=["en", "fr", "ar", "auto"], default="auto")
     parser.add_argument("--no-spell-check", action="store_true")
     parser.add_argument("--no-filter", action="store_true")
     parser.add_argument("--no-cache", action="store_true")
-    parser.add_argument("--no-wikipedia", action="store_true", help="Skip Wikipedia")
-    parser.add_argument(
-        "--ddg-limit", type=int, default=100, help="DDG results (default: 100)"
-    )
+    parser.add_argument("--no-wikipedia", action="store_true")
+    parser.add_argument("--ddg-limit", type=int, default=100)
     parser.add_argument("--clear-cache", action="store_true")
     parser.add_argument("--cache-ttl", type=int, default=86400)
-    parser.add_argument(
-        "--min-relevance",
-        type=float,
-        default=0,
-        help="Minimum relevance (0-100). Default: 0 (show all)",
-    )
+    parser.add_argument("--min-relevance", type=float, default=0)
 
     args = parser.parse_args()
 
@@ -280,58 +569,66 @@ def main():
         terms = []
         for q in args.queries:
             terms.extend([t.strip() for t in q.split(",") if t.strip()])
-        print_clear()
         theme = detect_theme(" ".join(terms)) if terms else ThemeColors.DEFAULT
-        print_logo(theme)
         process_deep_search(terms, theme, args)
         return
 
+    from .tui import run_tui as _run_tui
+
     while True:
-        clear_screen()
-        print_logo(ThemeColors.DEFAULT)
-        sys_info = get_system_info()
-        console.print(
-            Align.center(
-                get_sticky_footer(
-                    sys_info["cpu_percent"],
-                    sys_info["memory_mb"],
-                    {},
-                    ThemeColors.DEFAULT,
-                )
-            )
-        )
+        result = _run_tui()
 
-        user_input = get_user_input()
-
-        if user_input is None:
+        if result is None:
+            console.print(f"\n[{c('accent_blue')}]Goodbye![/{c('accent_blue')}]\n")
             break
 
-        raw_input, terms, theme = user_input
-
-        if is_command(raw_input):
-            command = parse_command(raw_input)
-            if command.value == "export":
-                execute_command(command, _last_search_data)
+        if result:
+            if isinstance(result, tuple):
+                query_str, mode = result
             else:
-                should_continue = execute_command(command)
-                if not should_continue:
-                    break
-            try:
-                console.input("\n[dim]Press Enter to continue...[/dim] ")
-            except KeyboardInterrupt:
-                console.print("\n[dim]Exiting...[/dim]")
-                break
-            continue
+                query_str = result
+                mode = "ai"
 
-        if not terms:
-            continue
+            terms = [t.strip() for t in query_str.split(",") if t.strip()]
+            if terms:
+                theme = detect_theme(terms[0])
+                args.mode = mode
+                process_deep_search(terms, theme, args)
 
-        process_deep_search(terms, theme, args)
-        try:
-            console.input("\n[dim]Press Enter to continue...[/dim] ")
-        except KeyboardInterrupt:
-            console.print("\n[dim]Exiting...[/dim]")
-            break
+                current_query = query_str
+                current_mode = mode
+
+                while True:
+                    console.print()
+                    followup = console.input(
+                        f"[{c('accent_blue')}]? [{c('yellow')}]Ask follow-up[/{c('yellow')}] "
+                        f"[{c('overlay0')}]or Ctrl+C new search: [/{c('overlay0')}]"
+                    )
+
+                    if not followup.strip():
+                        break
+
+                    if followup.strip().lower() in ["q", "quit", "exit"]:
+                        break
+
+                    if followup.strip().startswith(":"):
+                        break
+
+                    show_loading(console, f"Finding answer...", [])
+
+                    cache = get_sqlite_cache()
+                    cached = cache.get(current_query)
+
+                    if cached:
+                        answer = handle_followup(followup, cached, current_mode)
+                        print_clear()
+                        console.print(f"\n[{c('green')}]▸ {followup}[/{c('green')}]\n")
+                        console.print(f"[{c('text')}]{answer}[/{c('text')}]\n")
+                    else:
+                        console.print(
+                            f"[{c('yellow')}]Context expired. Please search again.[/{c('yellow')}]\n"
+                        )
+                        break
 
 
 if __name__ == "__main__":

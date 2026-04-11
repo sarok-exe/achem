@@ -1,8 +1,10 @@
 import os
 import sys
-import subprocess
 from enum import Enum
-from typing import Optional
+from rich.console import Console
+from rich.table import Table
+
+console = Console()
 
 
 class Command(Enum):
@@ -87,31 +89,57 @@ def clear_screen():
 
 
 def print_exit_message():
-    """Print exit message."""
-    print("\n👋 Goodbye! Thanks for using ACHEM.\n")
+    """Print exit message with Catppuccin styling."""
+    console.print(
+        f"\n[{c('accent_blue')}]👋 Goodbye! Thanks for using ACHEM.[/{c('accent_blue')}]\n"
+    )
     sys.exit(0)
 
 
 def print_help():
-    """Print help message."""
-    help_text = """
-╔══════════════════════════════════════════════════════════════╗
-║                       ACHEM Commands                        ║
-╠══════════════════════════════════════════════════════════════╣
-║  clear, cls     - Clear the screen                       ║
-║  exit, quit, q  - Exit the program                       ║
-║  export, save   - Export last summary to file             ║
-║  help, ?        - Show this help message                  ║
-║  version, v     - Show version info                       ║
-╠══════════════════════════════════════════════════════════════╣
-║  Just type your search query to get started!               ║
-╚══════════════════════════════════════════════════════════════╝
-"""
-    print(help_text)
+    """Print help message with Catppuccin styling."""
+    from .output_formatter import c, VERSION
+
+    table = Table(
+        title="ACHEM Commands",
+        show_header=True,
+        header_style=f"bold {c('accent_blue')}",
+        border_style=c("surface2"),
+        title_style=f"bold {c('mauve')}",
+    )
+
+    table.add_column("Command", style=f"{c('green')}", width=18)
+    table.add_column("Description", style=f"{c('text')}")
+
+    commands = [
+        ("clear, cls", "Clear the screen"),
+        ("exit, quit, q", "Exit the program"),
+        ("export, save", "Export last summary to file"),
+        ("help, ?", "Show this help message"),
+        ("version, v", "Show version info"),
+    ]
+
+    for cmd, desc in commands:
+        table.add_row(cmd, desc)
+
+    console.print()
+    console.print(table)
+    console.print(
+        f"\n[{c('overlay0')}]└── Just type your search query to get started![/{c('overlay0')}]\n"
+    )
 
 
 def print_version():
-    """Print version info."""
-    from .output_formatter import VERSION
+    """Print version info with Catppuccin styling."""
+    from .output_formatter import VERSION, c
 
-    print(f"\nACHEM v{VERSION}\n")
+    console.print(
+        f"\n[{c('mauve')}]ACHEM[/{c('mauve')}] [{c('accent_blue')}]v{VERSION}[/{c('accent_blue')}]\n"
+    )
+
+
+def c(name: str) -> str:
+    """Get Catppuccin color by name for Rich formatting."""
+    from .output_formatter import c as get_color
+
+    return get_color(name)

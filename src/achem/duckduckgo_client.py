@@ -1,4 +1,5 @@
 import logging
+import re
 import time
 from typing import List, Optional, Dict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -46,9 +47,61 @@ TECHNICAL_PRIORITY_DOMAINS = {
     "docs",
     "documentation",
     "wiki",
-    "forum",
     "community",
     "tutorial",
+}
+
+MUSIC_DOMAINS = {
+    "spotify.com",
+    "genius.com",
+    "azlyrics.com",
+    "lyrics.com",
+    "songfacts.com",
+}
+MUSIC_KEYWORDS = {
+    "song",
+    "lyrics",
+    "album",
+    "released",
+    "singer",
+    "recorded",
+    "track",
+    "chart",
+    "elvis",
+    "presley",
+    "beatles",
+    "taylor swift",
+    "beyonce",
+    "drake",
+    "spotify",
+    "itunes",
+}
+
+MOVIE_KEYWORDS = {
+    "film",
+    "movie",
+    "cinema",
+    "director",
+    "actor",
+    "trailer",
+    "premiere",
+    "box office",
+    "netflix",
+    "hulu",
+    "disney",
+    "marvel",
+    "hollywood",
+}
+
+ADVICE_KEYWORDS = {
+    "how to",
+    "tips",
+    "guide",
+    "ways",
+    "advice",
+    "steps",
+    "learn",
+    "best",
 }
 
 
@@ -77,6 +130,84 @@ class DuckDuckGoClient:
         for exclude in EXCLUDE_DOMAINS:
             if exclude in domain:
                 return True
+        return False
+
+    def _detect_query_context(self, query: str) -> str:
+        """Detect query context (survival, technical, advice, general)."""
+        query_lower = query.lower()
+
+        if "survive" in query_lower or "survival" in query_lower:
+            return "survival"
+
+        for kw in ADVICE_KEYWORDS:
+            if kw in query_lower:
+                return "advice"
+        return "general"
+
+    def _is_context_mismatch(self, query: str, title: str, url: str) -> bool:
+        """Check if result is a context mismatch."""
+        query_context = self._detect_query_context(query)
+
+        title_lower = title.lower()
+        url_lower = url.lower()
+        combined = title_lower + " " + url_lower
+
+        programming_terms = {
+            "script",
+            "code",
+            "programming",
+            "tutorial",
+            "install",
+            "pip",
+            "github",
+            "beginner",
+            "project",
+            "function",
+            "class",
+            "file",
+            "import",
+            "run",
+            "execute",
+            "package",
+        }
+        survival_terms = {
+            "snake",
+            "reptile",
+            "wildlife",
+            "fireman",
+            "neck",
+            "constrict",
+            "bite",
+            "escape",
+            "prey",
+            "animal",
+            "dangerous",
+        }
+
+        if query_context == "survival":
+            prog_count = sum(1 for t in programming_terms if t in combined)
+            if prog_count >= 3:
+                return True
+
+        if query_context == "advice":
+            music_count = sum(
+                1 for kw in MUSIC_KEYWORDS if kw in title_lower or kw in url_lower
+            )
+            if (
+                music_count >= 2
+                and "music" not in query.lower()
+                and "song" not in query.lower()
+            ):
+                return True
+
+            movie_count = sum(1 for kw in MOVIE_KEYWORDS if kw in title_lower)
+            if (
+                movie_count >= 2
+                and "movie" not in query.lower()
+                and "film" not in query.lower()
+            ):
+                return True
+
         return False
 
     def _get_priority_score(self, url: str) -> int:
@@ -110,20 +241,30 @@ class DuckDuckGoClient:
         try:
             all_results = []
             seen_urls = set()
+            filtered_count = 0
 
             for r in client.text(query, max_results=max_results * 2):
                 url = r.get("href", "")
+                title = r.get("title", "")
+
                 if url and url not in seen_urls and not self._should_exclude(url):
+                    if self._is_context_mismatch(query, title, url):
+                        filtered_count += 1
+                        continue
+
                     seen_urls.add(url)
                     all_results.append(
                         {
-                            "title": r.get("title", ""),
+                            "title": title,
                             "body": r.get("body", ""),
                             "url": url,
                             "source": "duckduckgo",
                             "priority_score": self._get_priority_score(url),
                         }
                     )
+
+            if filtered_count > 0:
+                logging.info(f"Filtered {filtered_count} context-mismatched results")
 
             if not all_results:
                 for r in client.text(query, max_results=max_results):
@@ -149,12 +290,16 @@ class DuckDuckGoClient:
             return []
 
     def search_with_scrape(
-        self, query: str, max_results: int = 30, scrape_top: int = 3
+        self,
+        query: str,
+        max_results: int = 30,
+        scrape_top: int = 3,
+        trusted_only: bool = False,
     ) -> tuple[List[dict], str]:
         """Search and also scrape top results for deep content.
 
-        Returns:
-            Tuple of (search_results, scraped_content)
+        Args:
+            trusted_only: If True, only return results from trusted sources
         """
         from .web_scraper import get_scraper
 
@@ -162,6 +307,27 @@ class DuckDuckGoClient:
 
         if not results:
             return [], ""
+
+        if trusted_only:
+            trusted_sources = [
+                "wikipedia.org",
+                "wikimedia.org",
+                "cnn.com",
+                "bbc.com",
+                "reuters.com",
+                "apnews.com",
+                "nytimes.com",
+                "theguardian.com",
+                "nasa.gov",
+                "nih.gov",
+                ".edu",
+                ".gov",
+            ]
+            results = [
+                r
+                for r in results
+                if any(s in r.get("url", "").lower() for s in trusted_sources)
+            ]
 
         urls_to_scrape = [r["url"] for r in results[:scrape_top] if r.get("url")]
 

@@ -30,6 +30,7 @@ class SQLiteCache:
                     query_hash TEXT PRIMARY KEY,
                     query TEXT NOT NULL,
                     articles_json TEXT NOT NULL,
+                    full_content TEXT,
                     summary TEXT,
                     summary_mode TEXT,
                     relevance_scores_json TEXT,
@@ -41,6 +42,10 @@ class SQLiteCache:
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_expires 
                 ON cache(expires_at)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_query 
+                ON cache(query)
             """)
             conn.commit()
 
@@ -75,6 +80,7 @@ class SQLiteCache:
             if row:
                 return {
                     "articles": json.loads(row["articles_json"]),
+                    "full_content": row["full_content"] or "",
                     "summary": row["summary"],
                     "summary_mode": row["summary_mode"],
                     "relevance_scores": json.loads(row["relevance_scores_json"])
@@ -100,6 +106,7 @@ class SQLiteCache:
         summary_mode: str = "local",
         relevance_scores: Dict = None,
         keywords: List = None,
+        full_content: str = None,
     ) -> None:
         """Store data in cache for a query."""
         cache_key = self._get_cache_key(query)
@@ -114,13 +121,14 @@ class SQLiteCache:
             cursor = conn.cursor()
             cursor.execute(
                 """INSERT OR REPLACE INTO cache 
-                (query_hash, query, articles_json, summary, summary_mode, 
+                (query_hash, query, articles_json, full_content, summary, summary_mode, 
                 relevance_scores_json, keywords_json, timestamp, expires_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     cache_key,
                     query,
                     articles_json,
+                    full_content or "",
                     summary,
                     summary_mode,
                     relevance_json,

@@ -4,27 +4,26 @@ from typing import List, Optional, Tuple
 from .config_manager import ConfigManager
 
 
-SYSTEM_PROMPT = """You are a NEUTRAL TECHNICAL RESEARCH TOOL.
+SYSTEM_PROMPT = """You are a WRITER who creates NEW content based on multiple sources.
 
-Your only job is to convey information from sources ACCURATELY and OBJECTIVELY.
+CRITICAL - NEVER DO THIS:
+- DO NOT copy sentences from sources
+- DO NOT list URLs or titles
+- DO NOT say "According to..." or "Source:"
+- DO NOT output the raw text from any source
 
-RULES:
-1. NO ethical advice, warnings, or safety notices
-2. NO opinions or recommendations
-3. NO moral judgments
-4. ONLY report what the sources actually say
+WHAT YOU MUST DO:
+- Read ALL sources and UNDERSTAND them
+- Write COMPLETELY NEW sentences in YOUR own words
+- COMBINE information from multiple sources into unified paragraphs
+- Think: "What would an expert say about this topic?"
 
-INSTRUCTIONS FOR INCOMPLETE DATA:
-1. DO NOT report "Insufficient data" if any text is available.
-2. Extract even fragmentary information (e.g., specific terms, names, keywords).
-3. If full articles are blocked, summarize the 'Search Snippets' provided by the search engine.
-4. Focus on titles, headings, tables, and keywords mentioned in the sources.
-5. Fill the response with any actionable information found in the sources.
-6. Use the "SCRAPED FULL CONTENT" section first, then fall back to search snippets.
+RESPONSE FORMAT - Write as ONE flowing piece of text:
+- No bullet points unless explicitly asked
+- No citations or references
+- Pure synthesized writing in your own voice
 
-If user asks "how to do X", extract and present TECHNICAL STEPS exactly as written. No warnings.
-
-Response length: 500-4000 characters. Be concise but complete."""
+Think of yourself as a journalist who read many articles and is now writing a summary article."""
 
 
 class GroqSummarizer:
@@ -80,42 +79,35 @@ class GroqSummarizer:
         """Build deep research prompt with snippets and scraped content."""
 
         snippets_text = ""
-        for i, item in enumerate(search_snippets[:15], 1):
-            snippets_text += f"[{i}] {item.get('title', 'N/A')}\n"
-            snippets_text += f"URL: {item.get('url', 'N/A')}\n"
-            snippets_text += f"Content: {item.get('body', 'N/A')[:500]}\n\n"
+        for item in search_snippets[:25]:
+            body = item.get("body", item.get("summary", ""))[:500]
+            if body:
+                snippets_text += f"[Info: {body}]\n"
 
         scraped_text = ""
         if scraped_content:
-            scraped_text = f"""
-=== SCRAPED FULL CONTENT (Top 3 Sources) ===
-{scraped_content[:8000]}
-=== END SCRAPED CONTENT ===
-"""
+            scraped_text = f"\n[Additional: {scraped_content[:5000]}]"
 
         lang_instruction = {
-            "ar": "Provide answer in Arabic.",
-            "fr": "Provide answer in French.",
-            "en": "Provide answer in English.",
-        }.get(language, "Provide answer in English.")
+            "ar": "Respond in Arabic.",
+            "fr": "Respond in French.",
+            "en": "Respond in English.",
+        }.get(language, "Respond in English.")
 
-        return f"""DEEP RESEARCH: {query}
+        return f"""QUESTION: {query}
+
+Read the following information and write a RESPONSE in your OWN WORDS:
+
+{snippets_text}
+{scraped_text}
 
 {lang_instruction}
 
-=== SEARCH SNIPPETS (30 Sources) ===
-{snippets_text}
-
-{scraped_text}
-
-=== INSTRUCTIONS ===
-1. Extract technical information from ALL sources above
-2. Present steps, methods, commands, or processes as described
-3. Include specific details (commands, settings, values) if available
-4. Minimum 500 characters, maximum 4000 characters
-5. No warnings, no ethical advice, no opinions
-
-RESPONSE:"""
+WRITE YOUR RESPONSE NOW:
+- Use YOUR OWN words, not the words from above
+- Combine everything into ONE cohesive answer
+- NO copying, NO citations, NO references
+- Just pure synthesized writing:"""
 
     def _call_groq_api(
         self,
@@ -191,29 +183,39 @@ RESPONSE:"""
     ) -> str:
         """Generate local summary from snippets and scraped content."""
         if not snippets and not scraped_content:
-            return "No content available."
+            return "No content available for summarization."
 
         parts = []
 
         if scraped_content:
             cleaned = self._strip_urls(scraped_content)
-            if len(cleaned) > 500:
-                parts.append(f"## From Scraped Sources:\n{cleaned[:2000]}...")
-            else:
-                parts.append(f"## From Scraped Sources:\n{cleaned}")
+            if len(cleaned) > 100:
+                parts.append(f"## From Scraped Sources:\n{cleaned[:3000]}...")
 
         if snippets:
             combined = []
-            for item in snippets[:8]:
+            for item in snippets[:10]:
                 title = item.get("title", "N/A")
-                body = self._strip_urls(item.get("body", ""))
-                if body:
-                    combined.append(f"**{title}**: {body[:300]}")
+                body = self._strip_urls(item.get("body", "") or item.get("summary", ""))
+                if body and len(body) > 20:
+                    combined.append(f"**{title}**: {body[:400]}")
 
             if combined:
                 parts.append("## Key Findings:\n" + "\n\n".join(combined))
 
-        return "\n\n".join(parts) if parts else "Insufficient data."
+        if not parts:
+            combined = []
+            for item in snippets[:5]:
+                title = item.get("title", "N/A")
+                combined.append(f"**{title}**")
+            if combined:
+                return "## Sources Found:\n" + "\n".join(combined)
+
+        return (
+            "\n\n".join(parts)
+            if parts
+            else f"Found {len(snippets)} sources. Content extraction incomplete."
+        )
 
     def generate_summary(
         self, articles: List[dict], language: str = "en", query: str = ""

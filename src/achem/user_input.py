@@ -1,17 +1,20 @@
-import sys
 from .output_formatter import (
     console,
     detect_theme,
     ThemeColors,
+    c,
 )
 
 
 def get_user_input():
     """Get search terms from user. Returns tuple of (query, terms, theme) or None for exit."""
     try:
-        query = console.input("\n[bold cyan]❯[/bold cyan] ")
+        prompt = f"\n[{c('accent_blue')}][bold]❯[/bold][/{c('accent_blue')}] "
+        query = console.input(prompt)
     except KeyboardInterrupt:
-        console.print("\n\n[cyan]Goodbye! Happy researching with ACHEM![/cyan]\n")
+        console.print(
+            f"\n\n[{c('accent_blue')}]Goodbye! Happy researching with ACHEM![/{c('accent_blue')}]\n"
+        )
         return None
 
     if query.strip():
