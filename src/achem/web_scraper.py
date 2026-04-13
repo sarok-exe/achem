@@ -54,7 +54,7 @@ class WebScraper:
         "Upgrade-Insecure-Requests": "1",
     }
 
-    def __init__(self, timeout: int = 15, max_content_length: int = 15000):
+    def __init__(self, timeout: int = 20, max_content_length: int = 50000):
         self.timeout = timeout
         self.max_content_length = max_content_length
         self.session = requests.Session()

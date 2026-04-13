@@ -69,6 +69,9 @@ class ConfigManager:
             if key.startswith("RESEARCH_"):
                 env_key = key.replace("RESEARCH_", "").lower()
                 env_config[env_key] = value
+            elif key.startswith("OLLAMA_"):
+                env_key = key.replace("OLLAMA_", "").lower()
+                env_config[env_key] = value
 
         return env_config
 
@@ -147,3 +150,18 @@ class ConfigManager:
     def get_temperature(self) -> float:
         """Get temperature for AI generation."""
         return float(self.get("temperature", "0.7"))
+
+    def get_ollama_base_url(self) -> str:
+        """Get Ollama base URL."""
+        return self.get("ollama_base_url", "http://localhost:11434")
+
+    def get_ollama_model(self) -> str:
+        """Get Ollama model name."""
+        return self.get("ollama_model", "llama3.2")
+
+    def is_ollama_primary(self) -> bool:
+        """Check if Ollama should be used as primary AI."""
+        primary = self.get("ollama_primary", "true")
+        if isinstance(primary, str):
+            return primary.lower() in ("true", "1", "yes")
+        return bool(primary)

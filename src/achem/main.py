@@ -6,6 +6,7 @@ import re
 import argparse
 import time
 import asyncio
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -20,6 +21,8 @@ from .gemini_summarizer import get_gemini_summarizer
 from .openrouter_summarizer import get_openrouter_summarizer
 from .local_summarizer import get_local_summarizer
 from .sqlite_cache import get_sqlite_cache
+from .config_manager import ConfigManager
+from .content_processor import ContentProcessor, process_content
 from .output_formatter import (
     console,
     detect_theme,
@@ -36,30 +39,32 @@ _tui_app = None
 
 
 def save_markdown_report(
-    query: str, summary: str, articles: list, keywords: list, mode: str
+    query: str,
+    summary: str,
+    articles: list,
+    keywords: list,
+    mode: str,
+    scraped_content: str = "",
 ) -> str:
-    """Save research report as markdown file."""
+    """Save research report as markdown file with FULL article text."""
     output_dir = Path.home() / "Documents" / "ACHEM"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     safe_query = "".join(ch for ch in query if ch.isalnum() or ch in " -").replace(
         " ", "_"
     )[:50]
-    filepath = output_dir / f"{safe_query}.md"
-
-    existing = list(output_dir.glob(f"{safe_query}*.md"))
-    if existing:
-        existing[0].unlink()
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filepath = output_dir / f"{safe_query}_{timestamp}.md"
 
     md_content = f"""# {query}
 
 **Generated:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-**Sources:** {len(articles)}
-**Mode:** {mode}
+**Total Sources:** {len(articles)}
+**Mode:** {mode.upper()}
 
 ---
 
-## Summary
+## AI Conclusion
 
 {summary}
 
@@ -67,18 +72,31 @@ def save_markdown_report(
 
 ## Keywords
 
-{", ".join(keywords[:10])}
+{", ".join(keywords[:15])}
 
 ---
 
-## Source References
+## Articles Content
 
 """
-    for i, article in enumerate(articles[:20], 1):
+    for i, article in enumerate(articles, 1):
         title = article.get("title", "Unknown")
-        url = article.get("url", "")
-        relevance = article.get("relevance_score", 0)
-        md_content += f"{i}. **{title}** (Relevance: {relevance}%)\n   {url}\n\n"
+        body = article.get("body", article.get("summary", ""))
+
+        md_content += f"""### Article {i}: {title}
+
+{body if body else "No content available."}
+
+---
+
+"""
+
+    if scraped_content:
+        md_content += f"""## Extracted Web Content
+
+{scraped_content}
+
+"""
 
     md_content += f"""---
 
@@ -133,70 +151,104 @@ def show_loading(console_obj, status: str, sources: list = None):
 
 
 def generate_local_summary(articles: list, query: str, keywords: list) -> str:
-    """Generate summary using TF-IDF extractive algorithm (no AI)."""
+    """Generate synthesis using extractive algorithm - combines and summarizes content."""
     if not articles:
         return "No articles to summarize."
 
     analyzer = TextAnalyzer()
-    all_text = ""
 
+    all_texts = []
     for article in articles:
         text = article.get("body", "") or article.get("summary", "")
-        if text and len(text) > 50:
-            all_text += " " + text
+        if text and len(text) > 30:
+            all_texts.append(text)
 
-    if not all_text.strip():
-        summaries = []
-        for a in articles[:5]:
+    if not all_texts:
+        for a in articles[:10]:
             s = a.get("summary", a.get("title", ""))
             if s:
-                summaries.append(s)
-        if summaries:
-            all_text = " ".join(summaries)
+                all_texts.append(s)
 
-    if not all_text.strip():
-        return f"Research on '{query}' found {len(articles)} sources but content was unavailable."
-
-    sentences = re.split(r"[.!?]+", all_text)
-    sentence_scores = {}
-
-    for sent in sentences:
-        sent = sent.strip()
-        if len(sent) < 30:
-            continue
-
-        score = 0
-        for kw, _ in keywords[:8]:
-            if kw.lower() in sent.lower():
-                score += 3
-
-        sent_words = set(analyzer.tokenize(sent.lower()))
-        for kw, _ in keywords:
-            if kw.lower() in sent_words:
-                score += 1
-
-        sentence_scores[sent] = score
-
-    if not sentence_scores:
+    if not all_texts:
         key_topics = ", ".join([k for k, _ in keywords[:5]])
         return f"Based on {len(articles)} sources about '{query}'.\n\n**Key Topics:** {key_topics}"
 
-    top_sentences = sorted(sentence_scores.items(), key=lambda x: x[1], reverse=True)[
-        :6
-    ]
+    combined = " ".join(all_texts)
+    sentences = re.split(r"[.!?\n]+", combined)
 
-    summary_parts = []
-    for sent, _ in sorted(top_sentences, key=lambda x: -len(x[0])):
+    keyword_set = {kw.lower() for kw, _ in keywords[:15]}
+
+    scored_sentences = []
+    seen_content = set()
+
+    for sent in sentences:
         sent = sent.strip()
-        if sent and sent not in summary_parts:
-            summary_parts.append(sent + ".")
-            if len(summary_parts) >= 4:
+        if len(sent) < 40 or len(sent) > 500:
+            continue
+
+        sent_lower = sent.lower()
+        content_hash = "".join(c for c in sent_lower if c.isalnum())[:50]
+        if content_hash in seen_content:
+            continue
+        seen_content.add(content_hash)
+
+        score = 0
+        words = set(analyzer.tokenize(sent_lower))
+
+        for kw in keyword_set:
+            if kw in sent_lower:
+                score += 5
+            if kw in words:
+                score += 3
+
+        score += len(sent) / 100
+
+        if score > 0:
+            scored_sentences.append((sent, score))
+
+    scored_sentences.sort(key=lambda x: x[1], reverse=True)
+
+    top_sents = [s for s, _ in scored_sentences[:15]]
+
+    theme_words = [kw for kw, _ in keywords[:8]]
+
+    conclusion_parts = []
+
+    intro = f"Based on analysis of {len(articles)} sources, here are the key findings about '{query}':"
+    conclusion_parts.append(intro)
+
+    conclusion_parts.append("")
+
+    paragraph = []
+    for sent in top_sents[:8]:
+        clean_sent = sent.strip()
+        if clean_sent:
+            paragraph.append(clean_sent)
+            if len(paragraph) >= 3:
                 break
 
-    summary = " ".join(summary_parts[:4])
+    if paragraph:
+        conclusion_parts.append(" ".join(paragraph) + ".")
+
+    themes_para = []
+    for sent in top_sents[8:]:
+        clean_sent = sent.strip()
+        if clean_sent and any(kw in clean_sent.lower() for kw in theme_words[:4]):
+            themes_para.append(clean_sent)
+            if len(themes_para) >= 2:
+                break
+
+    if themes_para:
+        conclusion_parts.append("")
+        conclusion_parts.append(" ".join(themes_para) + ".")
+
     key_topics = ", ".join([k for k, _ in keywords[:6]])
 
-    return f"{summary}\n\n**Key Topics:** {key_topics}\n\n**Sources:** {len(articles)} articles analyzed"
+    conclusion_parts.append("")
+    conclusion_parts.append(f"**Key Topics:** {key_topics}")
+    conclusion_parts.append(f"**Sources Analyzed:** {len(articles)}")
+
+    return "\n".join(conclusion_parts)
 
 
 TRUSTED_SOURCES = [
@@ -225,7 +277,7 @@ def process_deep_search(terms: list[str], theme, args, show_loading_ui=False):
     """Deep Web Research - local or AI mode."""
     mode = getattr(args, "mode", "ai")
     ddg_limit = args.ddg_limit if args.ddg_limit else 100
-    scrape_top = 10
+    scrape_top = min(100, ddg_limit)
     query = " ".join(terms)
     start_time = time.time()
 
@@ -259,12 +311,20 @@ def process_deep_search(terms: list[str], theme, args, show_loading_ui=False):
     ]
     scraped_results = scraper.scrape_batch(urls_to_scrape)
 
-    scraped_content = ""
+    show_loading(
+        console, f"Scraped {len(scraped_results)} pages. Processing content...", []
+    )
+
+    raw_scraped_content = ""
     if scraped_results:
         for item in scraped_results:
-            scraped_content += f"\n\n=== {item['title']} ===\n{item['content'][:3000]}"
+            raw_scraped_content += (
+                f"\n\n=== {item['title']} ===\n{item['content'][:3000]}"
+            )
 
-    show_loading(console, f"Scraped {len(scraped_results)} pages. Analyzing...", [])
+    show_loading(
+        console, f"Processing {len(scraped_results)} pages with deduplication...", []
+    )
     time.sleep(0.2)
 
     scraped_urls = {item["url"]: item["content"] for item in scraped_results}
@@ -275,7 +335,7 @@ def process_deep_search(terms: list[str], theme, args, show_loading_ui=False):
         is_trusted = is_trusted_source(url)
         scraped_text = scraped_urls.get(url, "")
 
-        summary = r.get("body", "") or scraped_text[:500]
+        summary = r.get("body", "") or scraped_text[:2000]
         body = scraped_text if scraped_text else r.get("body", "")
 
         articles.append(
@@ -356,8 +416,52 @@ def process_deep_search(terms: list[str], theme, args, show_loading_ui=False):
         console.print(f"[{c('yellow')}]No relevant results found.[/{c('yellow')}]\n")
         return
 
-    keywords = analyzer.find_recurring_keywords(articles, top_n=10)
+    keywords = analyzer.find_recurring_keywords(articles, top_n=15)
     final_count = len(articles)
+    keyword_list = [kw for kw, _ in keywords]
+    query_words = set(query.lower().split())
+    all_keywords = keyword_list + list(query_words)
+
+    show_loading(
+        console,
+        f"Processing {len(scraped_results)} pages with keyword filtering...",
+        [],
+    )
+
+    def filter_relevant(text: str, keywords: list, min_matches: int = 1) -> str:
+        if not text:
+            return ""
+        sentences = re.split(r"[.!?\n]+", text)
+        relevant = []
+        for sent in sentences:
+            sent = sent.strip()
+            if len(sent) < 30:
+                continue
+            matches = sum(1 for kw in keywords if kw.lower() in sent.lower())
+            if matches >= min_matches:
+                relevant.append(sent)
+        return ". ".join(relevant)
+
+    scraped_content = ""
+    if scraped_results:
+        filtered_parts = []
+        for item in scraped_results:
+            title = item.get("title", "")
+            content = item.get("content", "")
+            if content and len(content) > 100:
+                filtered = filter_relevant(content, all_keywords, min_matches=1)
+                if filtered:
+                    filtered_parts.append(f"[{title}]\n{filtered}")
+        scraped_content = "\n\n".join(filtered_parts)
+
+    if not scraped_content and scraped_results:
+        scraped_content = "\n\n".join(
+            [
+                f"[{item.get('title', '')}]\n{item.get('content', '')[:2000]}"
+                for item in scraped_results[:30]
+                if item.get("content")
+            ]
+        )
 
     combined_text = " ".join([a.get("summary", "") for a in articles])
     lang = detect_language(combined_text) if args.lang == "auto" else args.lang
@@ -366,45 +470,81 @@ def process_deep_search(terms: list[str], theme, args, show_loading_ui=False):
         show_loading(console, "Generating summary (TF-IDF)...", [])
         unified_summary = generate_local_summary(articles, query, keywords)
         result_mode = "local"
-    elif mode == "ollama":
-        show_loading(console, "Generating AI summary (Local Ollama)...", [])
-        local_summarizer = get_local_summarizer()
-        if local_summarizer.is_ai_available():
-            unified_summary, result_mode = local_summarizer.generate_summary(
-                articles=articles,
-                language=lang,
-                query=query,
-            )
-        else:
-            console.print(
-                f"  [{c('yellow')}]Ollama not running. Starting AI search...[/]"
-            )
-            mode = "ai"
     else:
         show_loading(console, "Generating AI summary...", [])
+        config = ConfigManager()
         openrouter_summarizer = get_openrouter_summarizer()
         groq_summarizer = get_groq_summarizer()
         gemini_summarizer = get_gemini_summarizer()
+        local_summarizer = get_local_summarizer(config)
 
         if openrouter_summarizer.is_ai_available():
-            summarizer = openrouter_summarizer
+            unified_summary, result_mode = (
+                openrouter_summarizer.generate_deep_research_summary(
+                    search_snippets=articles,
+                    scraped_content=scraped_content,
+                    language=lang,
+                    query=query,
+                )
+            )
         elif groq_summarizer.is_ai_available():
-            summarizer = groq_summarizer
+            unified_summary, result_mode = (
+                groq_summarizer.generate_deep_research_summary(
+                    search_snippets=articles,
+                    scraped_content=scraped_content,
+                    language=lang,
+                    query=query,
+                )
+            )
         elif gemini_summarizer.is_ai_available():
-            summarizer = gemini_summarizer
+            unified_summary, result_mode = (
+                gemini_summarizer.generate_deep_research_summary(
+                    search_snippets=articles,
+                    scraped_content=scraped_content,
+                    language=lang,
+                    query=query,
+                )
+            )
+        elif local_summarizer.is_ai_available():
+            unified_summary, result_mode = (
+                local_summarizer.generate_deep_research_summary(
+                    search_snippets=articles,
+                    scraped_content=scraped_content,
+                    language=lang,
+                    query=query,
+                )
+            )
+        elif groq_summarizer.is_ai_available():
+            unified_summary, result_mode = (
+                groq_summarizer.generate_deep_research_summary(
+                    search_snippets=articles,
+                    scraped_content=scraped_content,
+                    language=lang,
+                    query=query,
+                )
+            )
+        elif gemini_summarizer.is_ai_available():
+            unified_summary, result_mode = (
+                gemini_summarizer.generate_deep_research_summary(
+                    search_snippets=articles,
+                    scraped_content=scraped_content,
+                    language=lang,
+                    query=query,
+                )
+            )
+        elif local_summarizer.is_ai_available():
+            unified_summary, result_mode = (
+                local_summarizer.generate_deep_research_summary(
+                    search_snippets=articles,
+                    scraped_content=scraped_content,
+                    language=lang,
+                    query=query,
+                )
+            )
         else:
-            local_summarizer = get_local_summarizer()
-            if local_summarizer.is_ai_available():
-                summarizer = local_summarizer
-            else:
-                summarizer = get_hf_summarizer()
-
-        unified_summary, result_mode = summarizer.generate_deep_research_summary(
-            search_snippets=articles,
-            scraped_content=scraped_content,
-            language=lang,
-            query=query,
-        )
+            show_loading(console, "Generating summary (TF-IDF)...", [])
+            unified_summary = generate_local_summary(articles, query, keywords)
+            result_mode = "local"
 
     show_loading(console, "Finalizing results...", [])
     time.sleep(0.2)
@@ -441,7 +581,12 @@ def process_deep_search(terms: list[str], theme, args, show_loading_ui=False):
         )
 
     markdown_path = save_markdown_report(
-        query, unified_summary, articles, [kw for kw, _ in keywords], result_mode
+        query,
+        unified_summary,
+        articles,
+        [kw for kw, _ in keywords],
+        result_mode,
+        scraped_content,
     )
     console.print(
         f"[{c('overlay0')}]Report saved to: {markdown_path}[/{c('overlay0')}]\n"
@@ -549,9 +694,9 @@ def main():
     parser.add_argument("-l", "--limit", type=int, default=10)
     parser.add_argument(
         "--mode",
-        choices=["local", "ai", "ollama"],
+        choices=["local", "ai"],
         default="ai",
-        help="local: TF-IDF, ai: cloud AI, ollama: local AI",
+        help="local: TF-IDF, ai: cloud AI",
     )
     parser.add_argument("--lang", choices=["en", "fr", "ar", "auto"], default="auto")
     parser.add_argument("--no-spell-check", action="store_true")

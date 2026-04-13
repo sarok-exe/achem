@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "achem"
-version = "1.0.4"
-description = "Deep Web Research Tool - Aggregates 100+ sources, scrapes content, generates AI summaries"
+version = "1.1.0"
+description = "Deep Web Research Tool with Structural Positional Search - AI-powered synthesis using Ordinal Distance algorithm"
 readme = "README.md"
 license = "MIT"
 authors = [
-    {name = "ACHEM Contributors"}
+    {name = "Sarok"}
 ]
 keywords = [
     "research",
@@ -18,7 +18,10 @@ keywords = [
     "summarization",
     "ai",
     "cli",
-    "tool"
+    "tool",
+    "ordinal-distance",
+    "positional-search",
+    "ollama"
 ]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
@@ -50,6 +53,8 @@ dependencies = [
     "beautifulsoup4>=4.12.0",
     "requests>=2.31.0",
     "trafilatura>=1.6.0",
+    "textual>=0.50.0",
+    "duckduckgo-search>=4.0.0",
 ]
 
 [project.optional-dependencies]
@@ -57,9 +62,17 @@ arabic = [
     "arabic-reshaper>=3.0.0",
     "python-bidi>=0.14.0",
 ]
+ollama = [
+    "ollama>=0.1.0",
+]
 dev = [
     "pytest>=7.0.0",
     "ruff>=0.1.0",
+]
+all = [
+    "arabic-reshaper>=3.0.0",
+    "python-bidi>=0.14.0",
+    "ollama>=0.1.0",
 ]
 
 [project.scripts]

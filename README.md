@@ -1,138 +1,113 @@
 # ACHEM - Deep Web Research Tool
 
-![ACHEM Banner](https://img.shields.io/badge/ACHEM-v1.0.5-blue?style=for-the-badge)
+![ACHEM Banner](https://img.shields.io/badge/ACHEM-v1.1.0-blue?style=for-the-badge)
 
-> **ACHEM** (Arabic: آشم) is a powerful deep web research tool that aggregates information from 100+ sources, scrapes full content from top results using anti-bot bypass techniques, and generates AI-powered summaries.
+> **ACHEM** (Arabic: آشم) is a powerful deep web research tool that extracts content from 100+ sources, scrapes full article text, filters relevant content, and generates AI-powered conclusions.
 
 ## Features
 
-- **Deep Web Research**: Gathers results from 100+ sources via DuckDuckGo
-- **Advanced Web Scraping**: Uses Trafilatura + browser headers to bypass bot protection
-- **Multi-AI Providers**: OpenRouter (free), Groq, Gemini, and HuggingFace as fallbacks
-- **Two-Pass Search**: Prioritizes technical content (StackOverflow, GitHub, forums)
-- **SQLite Cache**: Instant recall for repeated searches
-- **Markdown Export**: Auto-saves reports to `~/Documents/ACHEM/`
+- **100+ Sources**: Searches DuckDuckGo for up to 100 results
+- **Full Content Extraction**: Scrapes full article text using Trafilatura
+- **Smart Content Filtering**: Removes ads/boilerplate, keeps only relevant sentences
+- **AI Conclusions**: Generates synthesized final verdicts with probability predictions
+- **Multi-AI Providers**: OpenRouter (free), Groq, Gemini, Ollama
+- **Markdown Export**: Saves complete reports with all sources to `~/Documents/ACHEM/`
 - **Multi-language**: Supports English, French, and Arabic
 - **Rate Limit Retry**: Automatic retry on 429 errors
+
 ## Installation
 
 ### Prerequisites
 
 - Python 3.10 or higher
-- pip package manager
+- uv package manager (recommended)
 
-### Quick Install (PyPI)
-
-```bash
-pipx install achem
-```
-
-> **Note**: `pipx` is recommended as it manages virtual environments automatically. If you prefer pip, use `pip install achem --break-system-packages`.
-
-### Or Install from Source
+### Quick Install
 
 ```bash
 git clone https://github.com/sarok-exe/achem.git
 cd achem
-pip install -e .
+uv venv .venv && source .venv/bin/activate
+uv pip install -e .
 ```
 
 ### API Configuration
 
-Create `~/.ACHEM/api.env` or `~/Documents/ACHEM/api.env`:
+Create config at `~/.ACHEM/api.env` or `~/Documents/ACHEM/api.env`:
 
 ```bash
 # OpenRouter (free, recommended)
 OPENROUTER_API_KEY=your_openrouter_key_here
-OPENROUTER_MODEL=qwen/qwen3.6-plus:free
-AI_ENABLED=true
+OPENROUTER_MODEL=google/gemma-4-31b-it:free
 
-# Or use other providers:
-# GROQ_API_KEY=your_groq_key
-# GEMINI_API_KEY=your_gemini_key
-# HF_API_KEY=your_huggingface_key
+# Ollama (local AI)
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=llama3.2
+OLLAMA_PRIMARY=false
 ```
 
-#### Getting an API Key
-
-- **OpenRouter** (free): https://openrouter.ai/settings
-- **Groq**: https://console.groq.com/keys
-- **Gemini**: https://aistudio.google.com/app/apikey
-- **HuggingFace**: https://huggingface.co/settings/access-tokens
+Get OpenRouter API key: https://openrouter.ai/settings
 
 ## Usage
 
-### Interactive Mode
+### Command Line
 
 ```bash
-python src/main.py
+achem "your research query" --ddg-limit 100
 ```
 
-### Command Line Mode
+### Options
 
 ```bash
-python src/main.py "your search query"
+--ddg-limit N        Number of DuckDuckGo results (default: 100)
+--mode ai           Use AI for conclusions (default)
+--mode local        Use local TF-IDF (no API needed)
+--lang en/fr/ar     Response language
+--no-wikipedia      Skip Wikipedia sources
+--no-cache         Skip cache
 ```
+
 ## How It Works
-
-### Two-Pass Search System
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│ PASS 1: DuckDuckGo Search (100 sources)             │
-│ • Prioritizes technical sites                        │
-│ • Filters out cookie/login/consent pages            │
-│ • Ranks by relevance score                         │
+│ 1. SEARCH (100+ sources)                           │
+│    • DuckDuckGo web search                         │
+│    • Prioritizes relevant content                 │
 ├─────────────────────────────────────────────────────┤
-│ PASS 2: Web Scraping (Top 15)                       │
-│ • Uses browser headers to bypass bot detection      │
-│ • Trafilatura extracts main content                │
-│ • Falls back to BeautifulSoup if needed            │
-│ • Combines up to 15,000 chars per article          │
+│ 2. SCRAPE (Full article text)                      │
+│    • Extracts full content from URLs               │
+│    • Uses Trafilatura for clean text               │
+│    • Scrapes up to 100 pages concurrently         │
 ├─────────────────────────────────────────────────────┤
-│ PASS 3: AI Summarization                            │
-│ • Priority: OpenRouter → Groq → Gemini → HF         │
-│ • Neutral technical prompt                         │
-│ • No ethical warnings or opinions                   │
-│ • 500-4000 character output                        │
-│ • Retry on rate limit (429)                        │
+│ 3. FILTER (Relevant content only)                    │
+│    • Removes boilerplate and ads                   │
+│    • Keeps sentences matching keywords              │
+│    • Deduplicates similar content                  │
+├─────────────────────────────────────────────────────┤
+│ 4. AI CONCLUSION                                   │
+│    • Analyzes all content                          │
+│    • Generates final prediction                    │
+│    • Includes probability percentages               │
+│    • Provides key reasons                          │
 └─────────────────────────────────────────────────────┘
 ```
 
-### Source Priority
+## Output
 
-1. **OpenRouter** (free models like Qwen, GPT-oss)
-2. **Groq** (fast inference)
-3. **Gemini** (Google AI)
-4. **HuggingFace** (fallback)
-5. **Local** (if all APIs fail)
-
-## Export Location
-
-Summaries are saved to:
-- **Linux/macOS**: `~/Documents/ACHEM/`
-- **Windows**: `C:\Users\<username>\Documents\ACHEM\`
-
-## Disclaimer
-
-**ACHEM is for educational and research purposes only.**
-
-The tool aggregates publicly available information from the web. Any actions taken based on the information provided are the sole responsibility of the user. The developer is not responsible for any misuse of this tool.
+Reports saved to `~/Documents/ACHEM/` include:
+- **AI Conclusion**: Synthesized final prediction
+- **All Articles**: Full extracted content from each source
+- **Keywords**: Identified topics
+- **Extracted Web Content**: Combined filtered content
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit issues and pull requests.
+MIT License - see [LICENSE](LICENSE) file
 
 ## Acknowledgments
 
 - [OpenRouter](https://openrouter.ai/) - Free AI models
-- [Groq](https://groq.com/) - Fast AI inference
-- [Google Gemini](https://gemini.google.com/) - AI powered by Google
-- [HuggingFace](https://huggingface.co/) - AI models & inference
 - [DuckDuckGo](https://duckduckgo.com/) - Privacy-focused search
-- [Wikipedia](https://www.wikipedia.org/) - Free encyclopedia
 - [Trafilatura](https://trafilatura.readthedocs.io/) - Web content extraction
+- [Sumy](https://miso-belka.github.io/sumy/) - Text summarization

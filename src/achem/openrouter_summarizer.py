@@ -2,43 +2,25 @@ import logging
 import json
 import time
 import requests
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 from .config_manager import ConfigManager
 
 
-SYSTEM_PROMPT = """You are a WRITER who creates NEW content based on multiple sources.
-
-CRITICAL - NEVER DO THIS:
-- DO NOT copy sentences from sources
-- DO NOT list URLs or titles
-- DO NOT say "According to..." or "Source:"
-- DO NOT output the raw text from any source
-
-WHAT YOU MUST DO:
-- Read ALL sources and UNDERSTAND them
-- Write COMPLETELY NEW sentences in YOUR own words
-- COMBINE information from multiple sources into unified paragraphs
-- Think: "What would an expert say about this topic?"
-
-RESPONSE FORMAT - Write as ONE flowing piece of text:
-- No bullet points unless explicitly asked
-- No citations or references
-- Pure synthesized writing in your own voice
-
-Think of yourself as a journalist who read many articles and is now writing a summary article."""
+SYSTEM_PROMPT = (
+    """You are a research assistant. Read all sources and give ONE simple conclusion."""
+)
 
 
 class OpenRouterSummarizer:
-    """AI-powered summarizer using OpenRouter API - accesses free models."""
+    """AI-powered summarizer using OpenRouter API."""
 
     def __init__(self):
         self.config = ConfigManager()
         self._ai_available = None
-        self._client = None
 
     def is_ai_available(self) -> bool:
-        """Check if OpenRouter summarization is available and configured."""
+        """Check if OpenRouter API is configured."""
         if self._ai_available is not None:
             return self._ai_available
 
@@ -47,237 +29,155 @@ class OpenRouterSummarizer:
             return False
 
         api_key = self.config.get_openrouter_api_key()
-        if not api_key:
+        if not api_key or len(api_key) < 10:
+            logging.warning("OpenRouter API key not found")
             self._ai_available = False
             return False
 
         self._ai_available = True
         return True
 
-    def _get_client(self):
-        """Get or initialize OpenRouter client."""
-        if self._client is not None:
-            return self._client
-
+    def _call_api(self, prompt: str) -> str:
+        """Call OpenRouter API directly with requests."""
         api_key = self.config.get_openrouter_api_key()
-        if not api_key:
-            return None
+        model = self.config.get_openrouter_model() or "google/gemma-4-31b-it:free"
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://achem.github.io",
+            "X-Title": "ACHEM Research Tool",
+        }
+
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            "max_tokens": 2000,
+            "temperature": 0.4,
+        }
 
         try:
-            from openai import OpenAI
-
-            self._client = OpenAI(
-                base_url="https://openrouter.ai/v1",
-                api_key=api_key,
+            response = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=90,
             )
-            return self._client
-        except Exception as e:
-            logging.warning(f"Failed to configure OpenRouter: {e}")
-            return None
 
-    def _build_deep_research_prompt(
+            if response.status_code == 429:
+                logging.warning("Rate limited, retrying...")
+                time.sleep(3)
+                response = requests.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers=headers,
+                    json=payload,
+                    timeout=90,
+                )
+
+            if response.status_code != 200:
+                logging.error(
+                    f"OpenRouter error {response.status_code}: {response.text[:200]}"
+                )
+                return ""
+
+            data = response.json()
+            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            return content.strip() if content else ""
+
+        except requests.exceptions.Timeout:
+            logging.error("OpenRouter request timed out")
+            return ""
+        except Exception as e:
+            logging.error(f"OpenRouter error: {e}")
+            return ""
+
+    def generate_deep_research_summary(
         self,
         search_snippets: List[dict],
-        scraped_content: str,
-        language: str,
-        query: str,
-    ) -> str:
-        """Build deep research prompt with snippets and scraped content."""
+        scraped_content: str = "",
+        language: str = "en",
+        query: str = "",
+    ) -> Tuple[str, str]:
+        """Generate summary from search results."""
 
-        snippets_text = ""
-        for item in search_snippets[:25]:
-            body = item.get("body", item.get("summary", ""))[:500]
-            if body:
-                snippets_text += f"[Info: {body}]\n"
-
-        scraped_text = ""
-        if scraped_content:
-            scraped_text = f"\n[Additional: {scraped_content[:5000]}]"
+        if not self.is_ai_available():
+            return self._fallback_summary(search_snippets), "local"
 
         lang_instruction = {
             "ar": "Respond in Arabic.",
             "fr": "Respond in French.",
             "en": "Respond in English.",
-        }.get(language, "Respond in English.")
+        }.get(language[:2], "Respond in English.")
 
-        return f"""QUESTION: {query}
+        if scraped_content and len(scraped_content) > 100:
+            prompt = f"""Analyze all articles about "{query}" and provide:
 
-Read the following information and write a RESPONSE in your OWN WORDS:
+1. FINAL PREDICTION: Who will win/lose/draw?
+2. SCORE PREDICTION: Expected final score
+3. KEY REASONS: 3 reasons why
+4. CONFIDENCE: Your confidence level
 
-{snippets_text}
-{scraped_text}
+=== ARTICLES ===
+{scraped_content[:10000]}
+===
 
 {lang_instruction}
 
-WRITE YOUR RESPONSE NOW:
-- Use YOUR OWN words, not the words from above
-- Combine everything into ONE cohesive answer
-- NO copying, NO citations, NO references
-- Just pure synthesized writing:"""
+Provide detailed analysis:"""
+        else:
+            sources = []
+            for i, item in enumerate(search_snippets[:40], 1):
+                body = item.get("body", item.get("summary", ""))
+                if body:
+                    sources.append(f"[{i}] {body}")
 
-    def _call_openrouter_api(
-        self,
-        search_snippets: List[dict],
-        scraped_content: str,
-        language: str,
-        query: str,
-    ) -> Tuple[bool, str]:
-        """Generate summary using OpenRouter API with deep research prompt."""
-        api_key = self.config.get_openrouter_api_key()
-        if not api_key:
-            return False, ""
+            sources_text = "\n".join(sources)
 
-        try:
-            model = self.config.get_openrouter_model() or "openai/gpt-oss-20b:free"
-            prompt = self._build_deep_research_prompt(
-                search_snippets, scraped_content, language, query
-            )
+            prompt = f"""Analyze {len(search_snippets)} sources about "{query}" and provide:
 
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            }
-            payload = {
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt},
-                ],
-                "max_tokens": 2048,
-                "temperature": 0.5,
-            }
+1. FINAL PREDICTION: Who will win/lose/draw?
+2. SCORE PREDICTION: Expected final score
+3. KEY REASONS: 3 reasons why
+4. CONFIDENCE: Your confidence level
 
-            response = requests.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers=headers,
-                json=payload,
-                timeout=60,
-            )
+=== SOURCES ===
+{sources_text}
+===
 
-            if response.status_code == 429:
-                logging.warning("OpenRouter rate limited, retrying after delay...")
-                time.sleep(5)
-                response = requests.post(
-                    "https://openrouter.ai/api/v1/chat/completions",
-                    headers=headers,
-                    json=payload,
-                    timeout=60,
-                )
+{lang_instruction}
 
-            if response.status_code != 200:
-                logging.warning(f"OpenRouter API error: {response.status_code}")
-                return False, ""
+Provide detailed analysis:"""
 
-            data = response.json()
-            if "choices" not in data or not data["choices"]:
-                logging.warning("OpenRouter response missing choices")
-                return False, ""
+        result = self._call_api(prompt)
 
-            content = data["choices"][0].get("message", {}).get("content", "")
-            if content:
-                return True, content.strip()
-            return False, ""
-        except Exception as e:
-            logging.warning(f"OpenRouter API error: {e}")
-            return False, ""
+        if result and len(result) > 30:
+            return result, "openrouter"
 
-    def generate_deep_research_summary(
-        self,
-        search_snippets: List[dict],
-        scraped_content: str,
-        language: str,
-        query: str,
-    ) -> Tuple[str, str]:
-        """Generate deep research summary from snippets and scraped content.
+        return self._fallback_summary(search_snippets), "local"
 
-        Returns:
-            Tuple of (summary_text, mode)
-        """
-        if not search_snippets and not scraped_content:
-            return "No search results available.", "local"
+    def _fallback_summary(self, snippets: List[dict]) -> str:
+        """Simple fallback when API fails."""
+        if not snippets:
+            return "No results found."
 
-        if self.is_ai_available():
-            success, summary = self._call_openrouter_api(
-                search_snippets, scraped_content, language, query
-            )
-            if success and summary and len(summary) > 50:
-                return summary, "openrouter"
+        bodies = []
+        for item in snippets[:10]:
+            body = item.get("body", item.get("summary", ""))
+            if body:
+                bodies.append(body)
 
-        return self._generate_local_summary(search_snippets, scraped_content), "local"
+        return " ".join(bodies[:3]) if bodies else "Analysis unavailable."
 
-    def _strip_urls(self, text: str) -> str:
-        """Remove URLs from text."""
-        import re
 
-        text = re.sub(r"https?://\S+", "", text)
-        text = re.sub(r"URL:\s*\S+", "", text)
-        text = re.sub(r"\s+", " ", text).strip()
-        return text
-
-    def _generate_local_summary(
-        self, snippets: List[dict], scraped_content: str = ""
-    ) -> str:
-        """Generate local summary from snippets and scraped content."""
-        if not snippets and not scraped_content:
-            return "No content available for summarization."
-
-        parts = []
-
-        if scraped_content:
-            cleaned = self._strip_urls(scraped_content)
-            if len(cleaned) > 100:
-                parts.append(f"## From Scraped Sources:\n{cleaned[:3000]}...")
-
-        if snippets:
-            combined = []
-            for item in snippets[:10]:
-                title = item.get("title", "N/A")
-                body = self._strip_urls(item.get("body", "") or item.get("summary", ""))
-                if body and len(body) > 20:
-                    combined.append(f"**{title}**: {body[:400]}")
-
-            if combined:
-                parts.append("## Key Findings:\n\n" + "\n\n".join(combined))
-
-        if not parts:
-            combined = []
-            for item in snippets[:5]:
-                title = item.get("title", "N/A")
-                combined.append(f"**{title}**")
-            if combined:
-                return "## Sources Found:\n" + "\n".join(combined)
-
-        return (
-            "\n\n".join(parts)
-            if parts
-            else f"Found {len(snippets)} sources. Content extraction incomplete."
-        )
-
-    def generate_summary(
-        self, articles: List[dict], language: str = "en", query: str = ""
-    ) -> Tuple[str, str]:
-        """Legacy method - redirects to deep research if snippets available."""
-        snippets = []
-        scraped = ""
-
-        for article in articles:
-            title = article.get("title", "")
-            summary = article.get("summary", article.get("body", ""))
-            url = article.get("url", "")
-            if summary:
-                snippets.append(
-                    {
-                        "title": title,
-                        "body": summary,
-                        "url": url,
-                    }
-                )
-
-        return self.generate_deep_research_summary(snippets, scraped, language, query)
+_singleton = None
 
 
 def get_openrouter_summarizer() -> OpenRouterSummarizer:
-    """Get singleton instance of OpenRouterSummarizer."""
-    if not hasattr(get_openrouter_summarizer, "_instance"):
-        get_openrouter_summarizer._instance = OpenRouterSummarizer()
-    return get_openrouter_summarizer._instance
+    """Get singleton instance."""
+    global _singleton
+    if _singleton is None:
+        _singleton = OpenRouterSummarizer()
+    return _singleton
