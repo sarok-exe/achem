@@ -59,37 +59,37 @@ achem "your research query" --ddg-limit 100
 ### Options
 
 ```bash
---ddg-limit N        Number of DuckDuckGo results (default: 100)
+--ddg-limit N       Number of DuckDuckGo results (default: 100)
 --mode ai           Use AI for conclusions (default)
 --mode local        Use local TF-IDF (no API needed)
 --lang en/fr/ar     Response language
 --no-wikipedia      Skip Wikipedia sources
---no-cache         Skip cache
+--no-cache          Skip cache
 ```
 
 ## How It Works
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│ 1. SEARCH (100+ sources)                           │
-│    • DuckDuckGo web search                         │
-│    • Prioritizes relevant content                 │
+│ 1. SEARCH (100+ sources)                            │
+│    • DuckDuckGo web search                          │
+│    • Prioritizes relevant content                   │
 ├─────────────────────────────────────────────────────┤
-│ 2. SCRAPE (Full article text)                      │
-│    • Extracts full content from URLs               │
-│    • Uses Trafilatura for clean text               │
-│    • Scrapes up to 100 pages concurrently         │
+│ 2. SCRAPE (Full article text)                       │
+│    • Extracts full content from URLs                │
+│    • Uses Trafilatura for clean text                │
+│    • Scrapes up to 100 pages concurrently           │
 ├─────────────────────────────────────────────────────┤
-│ 3. FILTER (Relevant content only)                    │
-│    • Removes boilerplate and ads                   │
+│ 3. FILTER (Relevant content only)                   │
+│    • Removes boilerplate and ads                    │
 │    • Keeps sentences matching keywords              │
-│    • Deduplicates similar content                  │
+│    • Deduplicates similar content                   │
 ├─────────────────────────────────────────────────────┤
-│ 4. AI CONCLUSION                                   │
-│    • Analyzes all content                          │
-│    • Generates final prediction                    │
+│ 4. AI CONCLUSION                                    │
+│    • Analyzes all content                           │
+│    • Generates final prediction                     │
 │    • Includes probability percentages               │
-│    • Provides key reasons                          │
+│    • Provides key reasons                           │
 └─────────────────────────────────────────────────────┘
 ```
 
