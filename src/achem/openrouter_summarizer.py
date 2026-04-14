@@ -7,28 +7,33 @@ from typing import List, Tuple
 from .config_manager import ConfigManager
 
 
-SYSTEM_PROMPT = """You are an expert research analyst. Provide COMPREHENSIVE, DETAILED analysis of at least 300 words.
+SYSTEM_PROMPT = """You are an expert research analyst. Synthesize ALL sources into ONE COHERENT, WELL-ORGANIZED report.
 
-Requirements:
-- Write at least 300 words (detailed paragraphs)
-- Cover multiple aspects of the topic
-- Synthesize information from ALL sources
-- Provide deep insights and analysis
-- Use your OWN words, never copy sentences
-- Structure your response with clear sections
+CRITICAL RULES:
+1. NEVER copy sentences verbatim from sources
+2. NEVER repeat the same information twice
+3. Organize information by IMPORTANCE (most serious first)
+4. Write in YOUR OWN WORDS - paraphrase everything
+5. Create ONE flowing, coherent text
+6. If the topic is about risks/harms: Start with MOST SERIOUS risks first
+7. Write at least 300 words of meaningful analysis
 
-Output Format:
-## Overview
-[General understanding of the topic]
+STRUCTURE YOUR REPORT:
+## [Main Topic Title]
 
-## Key Findings
-[Detailed analysis with specific facts from sources]
+[Opening paragraph - most important finding first]
 
-## Important Details
-[Supporting evidence and statistics]
+[Body paragraphs:
+  - Most serious issues first
+  - Statistics and numbers
+  - Comparison with alternatives
+]
 
-## Conclusions
-[Your comprehensive conclusions]"""
+## Summary
+
+[Final 2-3 sentence synthesis]
+
+Write as ONE author, ONE voice. Do not list sources."""
 
 
 class OpenRouterSummarizer:
@@ -134,27 +139,35 @@ class OpenRouterSummarizer:
         if scraped_content and len(scraped_content) > 100:
             prompt = f"""QUESTION: {query}
 
-Read ALL articles below carefully and write a COMPREHENSIVE analysis of at least 300 words.
+Write a COMPREHENSIVE, WELL-ORGANIZED report of at least 300 words.
+
+ORGANIZE: Start with MOST SERIOUS findings first. Never repeat facts. Use YOUR OWN words.
 
 === ARTICLES ===
-{scraped_content[:15000]}
+{scraped_content[:12000]}
 ===
 
 {lang_instruction}
 
-Your comprehensive analysis (at least 300 words):"""
+Your organized analysis:"""
         else:
             sources = []
+            seen = set()
             for i, item in enumerate(search_snippets[:50], 1):
                 body = item.get("body", item.get("summary", ""))
-                if body:
-                    sources.append(f"[{i}] {body}")
+                if body and len(body) > 50:
+                    key = body[:100]
+                    if key not in seen:
+                        seen.add(key)
+                        sources.append(f"[{i}] {body[:800]}")
 
             sources_text = "\n".join(sources)
 
             prompt = f"""QUESTION: {query}
 
-Based on {len(search_snippets)} sources, write a COMPREHENSIVE analysis of at least 300 words.
+Write a COMPREHENSIVE, WELL-ORGANIZED report of at least 300 words.
+
+ORGANIZE: Start with MOST SERIOUS findings first. Never repeat facts. Use YOUR OWN words.
 
 === SOURCES ===
 {sources_text}
@@ -162,7 +175,7 @@ Based on {len(search_snippets)} sources, write a COMPREHENSIVE analysis of at le
 
 {lang_instruction}
 
-Your comprehensive analysis (at least 300 words):"""
+Your organized analysis:"""
 
         result = self._call_api(prompt)
 
