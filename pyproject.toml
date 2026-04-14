@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "achem"
-version = "1.1.0"
-description = "Deep Web Research Tool with Structural Positional Search - AI-powered synthesis using Ordinal Distance algorithm"
+version = "1.2.0"
+description = "Deep Web Research Tool - Auto-classifies topics, prioritizes relevant sources, generates 300+ word AI conclusions"
 readme = "README.md"
 license = "MIT"
 authors = [

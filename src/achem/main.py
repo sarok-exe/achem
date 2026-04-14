@@ -23,6 +23,11 @@ from .local_summarizer import get_local_summarizer
 from .sqlite_cache import get_sqlite_cache
 from .config_manager import ConfigManager
 from .content_processor import ContentProcessor, process_content
+from .topic_classifier import (
+    classify_query,
+    sort_by_topic_relevance,
+    get_topic_description,
+)
 from .output_formatter import (
     console,
     detect_theme,
@@ -281,25 +286,32 @@ def process_deep_search(terms: list[str], theme, args, show_loading_ui=False):
     query = " ".join(terms)
     start_time = time.time()
 
+    topic_category, priority_sites, topic_meta = classify_query(query)
+    topic_name = get_topic_description(topic_category)
+
     cache = None
     if not args.no_cache:
         cache = get_sqlite_cache(ttl_seconds=args.cache_ttl)
 
     show_loading(
         console,
-        f"[{c('green')}]LOCAL[/{c('green')}] Searching: {query[:35]}..."
+        f"[{c('green')}]{topic_name}[/{c('green')}] Searching: {query[:35]}..."
         if mode == "local"
-        else f"Searching: {query[:40]}...",
+        else f"[{c('accent_blue')}]{topic_name}[/{c('accent_blue')}] Searching: {query[:40]}...",
     )
 
     ddg_client = get_ddg_client(max_results=ddg_limit)
 
-    show_loading(console, "Searching DuckDuckGo...", [])
+    show_loading(console, f"Searching DuckDuckGo for {topic_name}...", [])
     ddg_results = ddg_client.search(query, max_results=ddg_limit)
+
+    ddg_results = sort_by_topic_relevance(ddg_results, query)
 
     sources = [r.get("title", "Unknown")[:50] for r in ddg_results[:8]]
     show_loading(
-        console, f"Found {len(ddg_results)} results. Scraping content...", sources
+        console,
+        f"Found {len(ddg_results)} {topic_name} results. Scraping content...",
+        sources,
     )
 
     from .web_scraper import get_scraper

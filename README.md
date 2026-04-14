@@ -1,28 +1,39 @@
 # ACHEM - Deep Web Research Tool
 
-![ACHEM Banner](https://img.shields.io/badge/ACHEM-v1.1.0-blue?style=for-the-badge)
+![ACHEM Banner](https://img.shields.io/badge/ACHEM-v1.2.0-blue?style=for-the-badge)
 
-> **ACHEM** (Arabic: آشم) is a powerful deep web research tool that extracts content from 100+ sources, scrapes full article text, filters relevant content, and generates AI-powered conclusions.
+> **ACHEM** (Arabic: آشم) is an intelligent research tool that automatically classifies your query, finds relevant specialized sources, and generates comprehensive 300+ word AI conclusions.
 
 ## Features
 
-- **100+ Sources**: Searches DuckDuckGo for up to 100 results
-- **Full Content Extraction**: Scrapes full article text using Trafilatura
-- **Smart Content Filtering**: Removes ads/boilerplate, keeps only relevant sentences
-- **AI Conclusions**: Generates synthesized final verdicts with probability predictions
-- **Multi-AI Providers**: OpenRouter (free), Groq, Gemini, Ollama
-- **Markdown Export**: Saves complete reports with all sources to `~/Documents/ACHEM/`
-- **Multi-language**: Supports English, French, and Arabic
-- **Rate Limit Retry**: Automatic retry on 429 errors
+### Smart Topic Classification
+Automatically detects your query type and prioritizes relevant sources:
+
+| Topic | Priority Sites |
+|-------|----------------|
+| Anime & Manga | MyAnimeList, Crunchyroll, Anime News Network |
+| Football/Soccer | The Analyst, ESPN, Sky Sports, Goal.com |
+| MMA/Fighting | Tapology, Sherdog, MMA Junkie |
+| Gaming | IGN, GameSpot, Metacritic, Steam |
+| Movies/TV | IMDb, Rotten Tomatoes, Metacritic |
+| Health/Medicine | Mayo Clinic, WebMD, WHO |
+| Science | Scientific American, Nature, NASA |
+| Technology | Stack Overflow, GitHub, TechCrunch |
+| History | Britannica, History.com |
+
+### Comprehensive Research
+- **100+ Sources**: Searches DuckDuckGo with topic-prioritized results
+- **Full Content Extraction**: Scrapes complete articles from specialized sites
+- **Smart Filtering**: Removes ads/boilerplate, keeps relevant content
+- **300+ Word Conclusions**: Detailed AI-generated analysis
+
+### How Results Are Sorted
+Results are sorted by relevance:
+1. Most relevant sources for your topic first
+2. Specialized sites for your query type
+3. General sources last
 
 ## Installation
-
-### Prerequisites
-
-- Python 3.10 or higher
-- uv package manager (recommended)
-
-### Quick Install
 
 ```bash
 git clone https://github.com/sarok-exe/achem.git
@@ -33,81 +44,67 @@ uv pip install -e .
 
 ### API Configuration
 
-Create config at `~/.ACHEM/api.env` or `~/Documents/ACHEM/api.env`:
+Create `~/.ACHEM/api.env`:
 
 ```bash
-# OpenRouter (free, recommended)
 OPENROUTER_API_KEY=your_openrouter_key_here
 OPENROUTER_MODEL=google/gemma-4-31b-it:free
-
-# Ollama (local AI)
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=llama3.2
-OLLAMA_PRIMARY=false
 ```
 
-Get OpenRouter API key: https://openrouter.ai/settings
+Get API key: https://openrouter.ai/settings
 
 ## Usage
 
-### Command Line
-
 ```bash
-achem "your research query" --ddg-limit 100
+achem "What are the health risks of smoking?" --ddg-limit 50
+achem "Who will win Bayern vs Real Madrid?" --ddg-limit 100
+achem "Latest One Piece chapter summary" --ddg-limit 50
 ```
 
 ### Options
 
 ```bash
---ddg-limit N       Number of DuckDuckGo results (default: 100)
---mode ai           Use AI for conclusions (default)
---mode local        Use local TF-IDF (no API needed)
---lang en/fr/ar     Response language
---no-wikipedia      Skip Wikipedia sources
---no-cache          Skip cache
+--ddg-limit N     Number of sources (default: 100)
+--mode ai         AI conclusions (default)
+--mode local      Local TF-IDF (no API)
+--lang en/fr/ar   Response language
 ```
 
 ## How It Works
 
 ```
-┌─────────────────────────────────────────────────────┐
-│ 1. SEARCH (100+ sources)                            │
-│    • DuckDuckGo web search                          │
-│    • Prioritizes relevant content                   │
-├─────────────────────────────────────────────────────┤
-│ 2. SCRAPE (Full article text)                       │
-│    • Extracts full content from URLs                │
-│    • Uses Trafilatura for clean text                │
-│    • Scrapes up to 100 pages concurrently           │
-├─────────────────────────────────────────────────────┤
-│ 3. FILTER (Relevant content only)                   │
-│    • Removes boilerplate and ads                    │
-│    • Keeps sentences matching keywords              │
-│    • Deduplicates similar content                   │
-├─────────────────────────────────────────────────────┤
-│ 4. AI CONCLUSION                                    │
-│    • Analyzes all content                           │
-│    • Generates final prediction                     │
-│    • Includes probability percentages               │
-│    • Provides key reasons                           │
-└─────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│ 1. CLASSIFY                                          │
+│    Detects topic: anime, football, health, etc.       │
+│    Identifies priority sites for your topic           │
+├──────────────────────────────────────────────────────┤
+│ 2. SEARCH (100+ sources)                             │
+│    Prioritizes specialized sites                      │
+│    Sorts by topic relevance                          │
+├──────────────────────────────────────────────────────┤
+│ 3. SCRAPE                                            │
+│    Extracts full article text                        │
+│    Removes ads and boilerplate                       │
+├──────────────────────────────────────────────────────┤
+│ 4. ANALYZE & CONCLUDE                                │
+│    Generates 300+ word comprehensive analysis        │
+│    Synthesizes all sources into detailed paragraphs  │
+└──────────────────────────────────────────────────────┘
 ```
 
 ## Output
 
-Reports saved to `~/Documents/ACHEM/` include:
-- **AI Conclusion**: Synthesized final prediction
-- **All Articles**: Full extracted content from each source
-- **Keywords**: Identified topics
-- **Extracted Web Content**: Combined filtered content
+Reports saved to `~/Documents/ACHEM/`:
+- **AI Conclusion**: 300+ word detailed analysis
+- **All Articles**: Full extracted content
+- **Topic Classification**: Shows detected category
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file
+MIT License
 
 ## Acknowledgments
 
 - [OpenRouter](https://openrouter.ai/) - Free AI models
-- [DuckDuckGo](https://duckduckgo.com/) - Privacy-focused search
-- [Trafilatura](https://trafilatura.readthedocs.io/) - Web content extraction
-- [Sumy](https://miso-belka.github.io/sumy/) - Text summarization
+- [DuckDuckGo](https://duckduckgo.com/) - Web search
+- [Trafilatura](https://trafilatura.readthedocs.io/) - Content extraction

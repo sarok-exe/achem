@@ -7,9 +7,28 @@ from typing import List, Tuple
 from .config_manager import ConfigManager
 
 
-SYSTEM_PROMPT = (
-    """You are a research assistant. Read all sources and give ONE simple conclusion."""
-)
+SYSTEM_PROMPT = """You are an expert research analyst. Provide COMPREHENSIVE, DETAILED analysis of at least 300 words.
+
+Requirements:
+- Write at least 300 words (detailed paragraphs)
+- Cover multiple aspects of the topic
+- Synthesize information from ALL sources
+- Provide deep insights and analysis
+- Use your OWN words, never copy sentences
+- Structure your response with clear sections
+
+Output Format:
+## Overview
+[General understanding of the topic]
+
+## Key Findings
+[Detailed analysis with specific facts from sources]
+
+## Important Details
+[Supporting evidence and statistics]
+
+## Conclusions
+[Your comprehensive conclusions]"""
 
 
 class OpenRouterSummarizer:
@@ -55,7 +74,7 @@ class OpenRouterSummarizer:
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
             ],
-            "max_tokens": 2000,
+            "max_tokens": 4000,
             "temperature": 0.4,
         }
 
@@ -113,35 +132,29 @@ class OpenRouterSummarizer:
         }.get(language[:2], "Respond in English.")
 
         if scraped_content and len(scraped_content) > 100:
-            prompt = f"""Analyze all articles about "{query}" and provide:
+            prompt = f"""QUESTION: {query}
 
-1. FINAL PREDICTION: Who will win/lose/draw?
-2. SCORE PREDICTION: Expected final score
-3. KEY REASONS: 3 reasons why
-4. CONFIDENCE: Your confidence level
+Read ALL articles below carefully and write a COMPREHENSIVE analysis of at least 300 words.
 
 === ARTICLES ===
-{scraped_content[:10000]}
+{scraped_content[:15000]}
 ===
 
 {lang_instruction}
 
-Provide detailed analysis:"""
+Your comprehensive analysis (at least 300 words):"""
         else:
             sources = []
-            for i, item in enumerate(search_snippets[:40], 1):
+            for i, item in enumerate(search_snippets[:50], 1):
                 body = item.get("body", item.get("summary", ""))
                 if body:
                     sources.append(f"[{i}] {body}")
 
             sources_text = "\n".join(sources)
 
-            prompt = f"""Analyze {len(search_snippets)} sources about "{query}" and provide:
+            prompt = f"""QUESTION: {query}
 
-1. FINAL PREDICTION: Who will win/lose/draw?
-2. SCORE PREDICTION: Expected final score
-3. KEY REASONS: 3 reasons why
-4. CONFIDENCE: Your confidence level
+Based on {len(search_snippets)} sources, write a COMPREHENSIVE analysis of at least 300 words.
 
 === SOURCES ===
 {sources_text}
@@ -149,7 +162,7 @@ Provide detailed analysis:"""
 
 {lang_instruction}
 
-Provide detailed analysis:"""
+Your comprehensive analysis (at least 300 words):"""
 
         result = self._call_api(prompt)
 
