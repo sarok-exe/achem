@@ -330,9 +330,6 @@ def print_unified_result(
     for line in result_lines:
         console.print(line)
     console.print()
-    for line in result_lines:
-        console.print(line)
-    console.print()
 
 
 def get_footer(cpu: float, ram: float, cache_stats: dict = None) -> Table:

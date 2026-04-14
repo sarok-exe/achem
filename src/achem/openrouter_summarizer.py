@@ -185,17 +185,37 @@ Your organized analysis:"""
         return self._fallback_summary(search_snippets), "local"
 
     def _fallback_summary(self, snippets: List[dict]) -> str:
-        """Simple fallback when API fails."""
+        """Simple fallback when API fails - properly deduplicated."""
         if not snippets:
             return "No results found."
 
-        bodies = []
-        for item in snippets[:10]:
+        seen = set()
+        unique_bodies = []
+        for item in snippets[:30]:
             body = item.get("body", item.get("summary", ""))
-            if body:
-                bodies.append(body)
+            if body and len(body) > 50:
+                key = body[:150].lower().strip()
+                if key not in seen:
+                    seen.add(key)
+                    unique_bodies.append(body[:800])
 
-        return " ".join(bodies[:3]) if bodies else "Analysis unavailable."
+        if not unique_bodies:
+            return "No unique content available."
+
+        combined = " ".join(unique_bodies[:8])
+
+        paragraphs = []
+        sentences = combined.replace(". ", ".\n").split("\n")
+        current = []
+        for s in sentences:
+            if len(" ".join(current)) > 300:
+                paragraphs.append(" ".join(current))
+                current = []
+            current.append(s.strip())
+        if current:
+            paragraphs.append(" ".join(current))
+
+        return "\n\n".join(paragraphs[:5]) if paragraphs else combined[:2000]
 
 
 _singleton = None

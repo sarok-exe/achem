@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "achem"
-version = "1.2.0"
+version = "1.2.2"
 description = "Deep Web Research Tool - Auto-classifies topics, prioritizes relevant sources, generates 300+ word AI conclusions"
 readme = "README.md"
 license = "MIT"
