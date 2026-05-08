@@ -752,6 +752,11 @@ def main():
         action="store_true",
         help="Force sync mode (disable async pipeline)",
     )
+    parser.add_argument(
+        "--no-academic",
+        action="store_true",
+        help="Disable ArXiv and Semantic Scholar search",
+    )
 
     args = parser.parse_args()
 
@@ -772,6 +777,7 @@ def main():
                         topic=query,
                         language=lang,
                         ddg_limit=args.ddg_limit or 100,
+                        academic=not args.no_academic,
                         progress_tracker=tracker,
                     )
 
@@ -858,6 +864,7 @@ def main():
                                 topic=query,
                                 language=lang,
                                 ddg_limit=getattr(args, "ddg_limit", 100),
+                                academic=not getattr(args, "no_academic", False),
                                 progress_tracker=tracker,
                             )
                         if not async_result.get("error"):

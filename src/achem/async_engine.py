@@ -23,6 +23,7 @@ from .duckduckgo_client import DuckDuckGoClient
 from .web_scraper import WebScraper
 from .planner import generate_search_queries
 from .reasoning_engine import synthesize_findings
+from .academic_client import search_academic
 from .output_formatter import c
 
 
@@ -249,14 +250,16 @@ async def async_deep_research(
     ddg_limit: int = 100,
     scrape_concurrent: int = 20,
     planner_model: Optional[str] = None,
+    academic: bool = True,
     progress_tracker: ProgressTracker = None,
 ) -> Dict:
-    """Full deep research pipeline: planner → batch search → merge results.
+    """Full deep research pipeline: planner → search (DDG + academic) → merge → reasoning.
 
     Stage 0: Decompose topic into sub-queries via OpenRouter
-    Stage 1: Search all sub-queries in parallel
+    Stage 1: Search DDG + academic sources (ArXiv, Semantic Scholar) in parallel
     Stage 2: Scrape all found URLs
-    Stage 3: Merge and deduplicate results
+    Stage 3: Merge and deduplicate all results
+    Stage 4: Reasoning / synthesis with citations
 
     Args:
         topic: The user's research topic
@@ -264,17 +267,18 @@ async def async_deep_research(
         ddg_limit: Results per sub-query
         scrape_concurrent: Max concurrent scrape connections
         planner_model: Optional model override for the planner
+        academic: Enable ArXiv + Semantic Scholar search (default: True)
         progress_tracker: Optional ProgressTracker
 
     Returns:
-        Dict with keys: 'results', 'articles', 'scraped', 'stats', 'sub_queries'
+        Dict with keys: results, articles, scraped, stats, sub_queries, reasoning, references
     """
     tracker = progress_tracker or ProgressTracker()
     own_tracker = progress_tracker is None
 
     stats = {"plan_time": 0, "search_time": 0, "scrape_time": 0,
              "total_sources": 0, "scraped_count": 0, "sub_queries": 0,
-             "reasoning_time": 0}
+             "reasoning_time": 0, "academic_time": 0}
     sub_queries = [topic]
 
     try:
@@ -322,6 +326,17 @@ async def async_deep_research(
             ddg_limit=per_query_limit,
         )
 
+        # ---- Academic Search (ArXiv + Semantic Scholar) ----
+        academic_all = []
+        if academic:
+            acad_start = time.time()
+            acad_tasks = [search_academic(q, max_results=5) for q in sub_queries]
+            acad_batches = await asyncio.gather(*acad_tasks, return_exceptions=True)
+            for batch in acad_batches:
+                if isinstance(batch, list):
+                    academic_all.extend(batch)
+            stats["academic_time"] = round(time.time() - acad_start, 2)
+
         # ---- Stage 3: Merge Results ----
         all_results = []
         all_scraped = []
@@ -346,6 +361,16 @@ async def async_deep_research(
                 sub_stats = res.get("stats", {})
                 stats["search_time"] += sub_stats.get("search_time", 0)
                 stats["scrape_time"] += sub_stats.get("scrape_time", 0)
+
+        # Merge academic results
+        for paper in academic_all:
+            url = paper.get("url", "")
+            title = paper.get("title", "")
+            if url and url not in seen_urls:
+                seen_urls.add(url)
+                all_results.append(paper)
+            elif title and title not in seen_titles and not url:
+                all_results.append(paper)
 
         scraped_by_url = {item["url"]: item["content"] for item in all_scraped}
 
@@ -401,6 +426,7 @@ async def async_deep_research(
             "results": all_results,
             "articles": articles,
             "scraped": all_scraped,
+            "academic": academic_all,
             "stats": stats,
             "sub_queries": sub_queries,
             "reasoning": reasoning,
@@ -414,7 +440,7 @@ async def async_deep_research(
         return {
             "results": [], "articles": [], "scraped": [],
             "stats": stats, "sub_queries": sub_queries, "error": str(e),
-            "reasoning": None, "references": [],
+            "reasoning": None, "references": [], "academic": [],
         }
 
 
@@ -441,10 +467,11 @@ def run_deep_research(
     language: str = "en",
     ddg_limit: int = 100,
     scrape_concurrent: int = 20,
+    academic: bool = True,
 ) -> Dict:
     """Synchronous entry point for the full deep research pipeline.
 
-    Calls the planner, then batch searches all sub-queries, merges results.
+    Calls the planner, then batch searches all sub-queries + academic sources, merges results.
     """
     return asyncio.run(
         async_deep_research(
@@ -452,5 +479,6 @@ def run_deep_research(
             language=language,
             ddg_limit=ddg_limit,
             scrape_concurrent=scrape_concurrent,
+            academic=academic,
         )
     )

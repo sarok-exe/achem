@@ -393,6 +393,9 @@ def print_async_stats(stats: dict) -> Table:
         parts.append(f"[{c('mauve')}]Planning ({plan_time}s)[/{c('mauve')}]")
     if reasoning_time:
         parts.append(f"[{c('pink')}]Synthesis ({reasoning_time}s)[/{c('pink')}]")
+    academic_time = stats.get("academic_time", 0)
+    if academic_time:
+        parts.append(f"[{c('teal')}]Academic ({academic_time}s)[/{c('teal')}]")
 
     table.add_row("  ⚡  ".join(parts))
     return table
