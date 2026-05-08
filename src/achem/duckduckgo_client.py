@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 import time
@@ -354,7 +355,67 @@ class DuckDuckGoClient:
 
         return all_results
 
+    async def search_async(self, query: str, max_results: int = None) -> List[dict]:
+        """Async search via asyncio.to_thread wrapping sync DDGS.text()."""
+        if max_results is None:
+            max_results = self.max_results
+
+        if not DDGS_AVAILABLE:
+            return []
+
+        try:
+            def _search_sync(q: str, limit: int) -> List[dict]:
+                client = DDGS(proxy=None, timeout=20)
+                results = []
+                seen = set()
+                for r in client.text(q, max_results=limit * 2):
+                    url = r.get("href", "") or r.get("link", "")
+                    title = r.get("title", "")
+                    if url and url not in seen and not self._should_exclude(url):
+                        if self._is_context_mismatch(q, title, url):
+                            continue
+                        seen.add(url)
+                        results.append({
+                            "title": title,
+                            "body": r.get("body", ""),
+                            "url": url,
+                            "source": "duckduckgo",
+                            "priority_score": self._get_priority_score(url),
+                        })
+                        if len(results) >= limit:
+                            break
+                return results
+
+            all_results = await asyncio.to_thread(_search_sync, query, max_results)
+            all_results.sort(key=lambda x: x["priority_score"], reverse=True)
+            return all_results[:max_results]
+
+        except Exception as e:
+            logging.warning(f"Async DuckDuckGo search error: {e}")
+            return []
+
+    async def search_batch_async(
+        self, queries: List[str], max_per_query: int = 10
+    ) -> List[dict]:
+        """Search multiple queries in parallel using asyncio.gather."""
+        tasks = [self.search_async(q, max_results=max_per_query) for q in queries]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        all_results = []
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                logging.warning(f"Async query failed: {queries[i]} - {result}")
+            elif isinstance(result, list):
+                all_results.extend(result)
+
+        return all_results
+
 
 def get_ddg_client(max_results: int = 30) -> DuckDuckGoClient:
     """Get DuckDuckGo client instance for deep research."""
+    return DuckDuckGoClient(max_results=max_results)
+
+
+def get_async_ddg_client(max_results: int = 30) -> DuckDuckGoClient:
+    """Get DuckDuckGo client instance for async deep research."""
     return DuckDuckGoClient(max_results=max_results)

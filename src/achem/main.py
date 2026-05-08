@@ -37,6 +37,14 @@ from .output_formatter import (
     print_clear,
     get_system_info,
     get_footer,
+    print_async_stats,
+    print_references_table,
+)
+from .async_engine import (
+    async_deep_research,
+    async_search_pipeline,
+    ProgressTracker,
+    run_deep_research,
 )
 
 _last_search_data = {}
@@ -278,11 +286,17 @@ def is_trusted_source(url: str) -> bool:
     return any(src in url_lower for src in TRUSTED_SOURCES)
 
 
-def process_deep_search(terms: list[str], theme, args, show_loading_ui=False):
-    """Deep Web Research - local or AI mode."""
+def process_deep_search(terms: list[str], theme, args, show_loading_ui=False, async_results=None):
+    """Deep Web Research - local or AI mode.
+
+    Args:
+        terms: Search terms
+        theme: UI theme
+        args: CLI arguments
+        show_loading_ui: Whether to show loading UI in TUI
+        async_results: Pre-computed results from async engine (skips sync search/scrape)
+    """
     mode = getattr(args, "mode", "ai")
-    ddg_limit = args.ddg_limit if args.ddg_limit else 100
-    scrape_top = min(100, ddg_limit)
     query = " ".join(terms)
     start_time = time.time()
 
@@ -293,75 +307,83 @@ def process_deep_search(terms: list[str], theme, args, show_loading_ui=False):
     if not args.no_cache:
         cache = get_sqlite_cache(ttl_seconds=args.cache_ttl)
 
-    show_loading(
-        console,
-        f"[{c('green')}]{topic_name}[/{c('green')}] Searching: {query[:35]}..."
-        if mode == "local"
-        else f"[{c('accent_blue')}]{topic_name}[/{c('accent_blue')}] Searching: {query[:40]}...",
-    )
+    if async_results:
+        ddg_results = async_results.get("results", [])
+        scraped_results = async_results.get("scraped", [])
+        articles = async_results.get("articles", [])
+    else:
+        ddg_limit = args.ddg_limit if args.ddg_limit else 100
+        scrape_top = min(100, ddg_limit)
 
-    ddg_client = get_ddg_client(max_results=ddg_limit)
+        show_loading(
+            console,
+            f"[{c('green')}]{topic_name}[/{c('green')}] Searching: {query[:35]}..."
+            if mode == "local"
+            else f"[{c('accent_blue')}]{topic_name}[/{c('accent_blue')}] Searching: {query[:40]}...",
+        )
 
-    show_loading(console, f"Searching DuckDuckGo for {topic_name}...", [])
-    ddg_results = ddg_client.search(query, max_results=ddg_limit)
+        ddg_client = get_ddg_client(max_results=ddg_limit)
 
-    ddg_results = sort_by_topic_relevance(ddg_results, query)
+        show_loading(console, f"Searching DuckDuckGo for {topic_name}...", [])
+        ddg_results = ddg_client.search(query, max_results=ddg_limit)
 
-    sources = [r.get("title", "Unknown")[:50] for r in ddg_results[:8]]
-    show_loading(
-        console,
-        f"Found {len(ddg_results)} {topic_name} results. Scraping content...",
-        sources,
-    )
+        ddg_results = sort_by_topic_relevance(ddg_results, query)
 
-    from .web_scraper import get_scraper
+        sources = [r.get("title", "Unknown")[:50] for r in ddg_results[:8]]
+        show_loading(
+            console,
+            f"Found {len(ddg_results)} {topic_name} results. Scraping content...",
+            sources,
+        )
 
-    scraper = get_scraper()
+        from .web_scraper import get_scraper
 
-    urls_to_scrape = [
-        r.get("url", "") for r in ddg_results[:scrape_top] if r.get("url")
-    ]
-    scraped_results = scraper.scrape_batch(urls_to_scrape)
+        scraper = get_scraper()
 
-    show_loading(
-        console, f"Scraped {len(scraped_results)} pages. Processing content...", []
-    )
+        urls_to_scrape = [
+            r.get("url", "") for r in ddg_results[:scrape_top] if r.get("url")
+        ]
+        scraped_results = scraper.scrape_batch(urls_to_scrape)
+
+        show_loading(
+            console, f"Scraped {len(scraped_results)} pages. Processing content...", []
+        )
+
+        show_loading(
+            console, f"Processing {len(scraped_results)} pages with deduplication...", []
+        )
+        time.sleep(0.2)
+
+        scraped_urls = {item["url"]: item["content"] for item in scraped_results}
+
+        articles = []
+        for r in ddg_results:
+            url = r.get("url", "")
+            is_trusted = is_trusted_source(url)
+            scraped_text = scraped_urls.get(url, "")
+
+            summary = r.get("body", "") or scraped_text[:2000]
+            body = scraped_text if scraped_text else r.get("body", "")
+
+            articles.append(
+                {
+                    "title": r.get("title", "Unknown"),
+                    "summary": summary,
+                    "body": body,
+                    "url": url,
+                    "source": "trusted" if is_trusted else "duckduckgo",
+                    "relevance_score": 70
+                    if is_trusted
+                    else 50 + r.get("priority_score", 0),
+                }
+            )
 
     raw_scraped_content = ""
     if scraped_results:
         for item in scraped_results:
             raw_scraped_content += (
-                f"\n\n=== {item['title']} ===\n{item['content'][:3000]}"
+                f"\n\n=== {item.get('title', item.get('url', 'Unknown'))} ===\n{item.get('content', '')[:3000]}"
             )
-
-    show_loading(
-        console, f"Processing {len(scraped_results)} pages with deduplication...", []
-    )
-    time.sleep(0.2)
-
-    scraped_urls = {item["url"]: item["content"] for item in scraped_results}
-
-    articles = []
-    for r in ddg_results:
-        url = r.get("url", "")
-        is_trusted = is_trusted_source(url)
-        scraped_text = scraped_urls.get(url, "")
-
-        summary = r.get("body", "") or scraped_text[:2000]
-        body = scraped_text if scraped_text else r.get("body", "")
-
-        articles.append(
-            {
-                "title": r.get("title", "Unknown"),
-                "summary": summary,
-                "body": body,
-                "url": url,
-                "source": "trusted" if is_trusted else "duckduckgo",
-                "relevance_score": 70
-                if is_trusted
-                else 50 + r.get("priority_score", 0),
-            }
-        )
 
     if not args.no_wikipedia:
         show_loading(console, "Adding Wikipedia references...", [])
@@ -719,15 +741,92 @@ def main():
     parser.add_argument("--clear-cache", action="store_true")
     parser.add_argument("--cache-ttl", type=int, default=86400)
     parser.add_argument("--min-relevance", type=float, default=0)
+    parser.add_argument(
+        "--async-mode",
+        action="store_true",
+        default=True,
+        help="Use async search + scrape pipeline (default: True)",
+    )
+    parser.add_argument(
+        "--sync",
+        action="store_true",
+        help="Force sync mode (disable async pipeline)",
+    )
 
     args = parser.parse_args()
+
+    args.async_mode = args.async_mode and not args.sync
 
     if args.queries:
         terms = []
         for q in args.queries:
             terms.extend([t.strip() for t in q.split(",") if t.strip()])
         theme = detect_theme(" ".join(terms)) if terms else ThemeColors.DEFAULT
-        process_deep_search(terms, theme, args)
+        if args.async_mode:
+            async def run_async():
+                query = " ".join(terms)
+                lang = args.lang if args.lang != "auto" else "en"
+
+                with ProgressTracker(console=console) as tracker:
+                    result = await async_deep_research(
+                        topic=query,
+                        language=lang,
+                        ddg_limit=args.ddg_limit or 100,
+                        progress_tracker=tracker,
+                    )
+
+                if not result.get("error"):
+                    references = result.get("references", [])
+                    reasoning = result.get("reasoning")
+
+                    if reasoning and reasoning.get("summary"):
+                        from rich.panel import Panel as RichPanel
+                        from rich.text import Text as RichText
+                        from rich import box as rich_box
+
+                        summary_text = reasoning.get("summary", "")
+                        findings = reasoning.get("key_findings", [])
+                        themes = reasoning.get("themes", [])
+                        confidence = reasoning.get("confidence_level", "medium")
+
+                        panel_lines = [f"[{c('text')}]{summary_text}[/{c('text')}]\n"]
+                        if findings:
+                            panel_lines.append(f"[bold {c('accent_blue')}]Key Findings:[/bold {c('accent_blue')}]")
+                            for f in findings[:5]:
+                                panel_lines.append(f"  [{c('green')}]◆[/{c('green')}] [{c('text')}]{f}[/{c('text')}]")
+                            panel_lines.append("")
+                        if themes:
+                            panel_lines.append(f"[bold {c('mauve')}]Themes:[/bold {c('mauve')}] {', '.join(themes[:5])}")
+                        panel_lines.append(f"[{c('overlay0')}]Confidence: {confidence} | Sources: {reasoning.get('sources_analyzed', 0)}[/{c('overlay0')}]")
+
+                        console.print()
+                        console.print(RichPanel(
+                            RichText("\n".join(panel_lines)),
+                            title=f" [{c('pink')}][bold]Research Synthesis[/bold][/{c('pink')}] ",
+                            border_style=c('pink'),
+                            box=rich_box.ROUNDED,
+                            width=90,
+                        ))
+                        console.print()
+
+                    cited_refs = reasoning.get("references", references) if reasoning else references
+                    ref_table = print_references_table(cited_refs)
+                    if ref_table:
+                        console.print(ref_table)
+                        console.print()
+
+                    stats = result.get("stats", {})
+                    console.print()
+                    stats_table = print_async_stats(stats)
+                    if stats_table:
+                        console.print(stats_table)
+                    console.print()
+
+                process_deep_search(terms, theme, args, async_results=result)
+
+            asyncio.run(run_async())
+        else:
+            process_deep_search(terms, theme, args)
         return
 
     from .tui import run_tui as _run_tui
@@ -750,7 +849,56 @@ def main():
             if terms:
                 theme = detect_theme(terms[0])
                 args.mode = mode
-                process_deep_search(terms, theme, args)
+                if args.async_mode:
+                    async def run_async_tui():
+                        query = " ".join(terms)
+                        lang = args.lang if args.lang != "auto" else "en"
+                        with ProgressTracker(console=console) as tracker:
+                            async_result = await async_deep_research(
+                                topic=query,
+                                language=lang,
+                                ddg_limit=getattr(args, "ddg_limit", 100),
+                                progress_tracker=tracker,
+                            )
+                        if not async_result.get("error"):
+                            references = async_result.get("references", [])
+                            reasoning = async_result.get("reasoning")
+                            if reasoning and reasoning.get("summary"):
+                                from rich.panel import Panel as RichPanel
+                                from rich.text import Text as RichText
+                                from rich import box as rich_box
+                                summary_text = reasoning.get("summary", "")
+                                findings = reasoning.get("key_findings", [])
+                                themes = reasoning.get("themes", [])
+                                confidence = reasoning.get("confidence_level", "medium")
+                                panel_lines = [f"[{c('text')}]{summary_text}[/{c('text')}]\n"]
+                                if findings:
+                                    panel_lines.append(f"[bold {c('accent_blue')}]Key Findings:[/bold {c('accent_blue')}]")
+                                    for f in findings[:5]:
+                                        panel_lines.append(f"  [{c('green')}]◆[/{c('green')}] [{c('text')}]{f}[/{c('text')}]")
+                                    panel_lines.append("")
+                                if themes:
+                                    panel_lines.append(f"[bold {c('mauve')}]Themes:[/bold {c('mauve')}] {', '.join(themes[:5])}")
+                                panel_lines.append(f"[{c('overlay0')}]Confidence: {confidence} | Sources: {reasoning.get('sources_analyzed', 0)}[/{c('overlay0')}]")
+                                console.print()
+                                console.print(RichPanel(
+                                    RichText("\n".join(panel_lines)),
+                                    title=f" [{c('pink')}][bold]Research Synthesis[/bold][/{c('pink')}] ",
+                                    border_style=c('pink'),
+                                    box=rich_box.ROUNDED,
+                                    width=90,
+                                ))
+                                console.print()
+
+                            cited_refs = reasoning.get("references", references) if reasoning else references
+                            ref_table = print_references_table(cited_refs)
+                            if ref_table:
+                                console.print(ref_table)
+                                console.print()
+                        process_deep_search(terms, theme, args, async_results=async_result)
+                    asyncio.run(run_async_tui())
+                else:
+                    process_deep_search(terms, theme, args)
 
                 current_query = query_str
                 current_mode = mode

@@ -1,10 +1,18 @@
+import asyncio
 import logging
 import time
 import requests
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
+
+try:
+    import aiohttp
+
+    AIOHTTP_AVAILABLE = True
+except ImportError:
+    AIOHTTP_AVAILABLE = False
 
 try:
     import trafilatura
@@ -76,7 +84,7 @@ class WebScraper:
         return True
 
     def scrape_url(self, url: str) -> Optional[Dict]:
-        """Scrape content from a single URL."""
+        """Scrape content from a single URL using requests (sync)."""
         if not self.should_scrape(url):
             return None
 
@@ -88,58 +96,13 @@ class WebScraper:
             if "text/html" not in content_type:
                 return None
 
-            html_content = response.text
-            content = ""
-            title = ""
+            extracted = self._extract_from_html(response.text, url)
+            if extracted is None:
+                return None
 
-            if TRAFILATURA_AVAILABLE:
-                result = trafilatura.extract(
-                    html_content,
-                    include_tables=True,
-                    include_images=False,
-                    include_comments=False,
-                    output_format="text",
-                )
-                if result:
-                    content = result.strip()
+            content = extracted["content"]
+            title = extracted["title"]
 
-                title_result = trafilatura.extract_metadata(html_content)
-                if (
-                    title_result
-                    and hasattr(title_result, "title")
-                    and title_result.title
-                ):
-                    title = title_result.title
-
-            if not content:
-                soup = BeautifulSoup(html_content, "html.parser")
-
-                for tag in soup(
-                    ["script", "style", "nav", "footer", "header", "aside", "noscript"]
-                ):
-                    tag.decompose()
-
-                title_tag = soup.find("title")
-                if title_tag:
-                    title = title_tag.get_text().strip()
-
-                article = soup.find("article")
-                if article:
-                    content = article.get_text(separator=" ", strip=True)
-                else:
-                    main = soup.find("main") or soup.find(
-                        "div",
-                        class_=lambda x: x and "content" in x.lower() if x else False,
-                    )
-                    if main:
-                        content = main.get_text(separator=" ", strip=True)
-                    else:
-                        body = soup.find("body")
-                        content = (
-                            body.get_text(separator=" ", strip=True) if body else ""
-                        )
-
-            content = " ".join(content.split())
             if len(content) > self.max_content_length:
                 content = content[: self.max_content_length]
 
@@ -157,6 +120,62 @@ class WebScraper:
             logging.debug(f"Failed to scrape {url}: {e}")
             return None
 
+    @staticmethod
+    def _extract_from_html(html_content: str, url: str) -> Optional[Dict]:
+        """Extract title and content from HTML using trafilatura then BS4 fallback."""
+        content = ""
+        title = ""
+
+        if TRAFILATURA_AVAILABLE:
+            result = trafilatura.extract(
+                html_content,
+                include_tables=True,
+                include_images=False,
+                include_comments=False,
+                output_format="txt",
+            )
+            if result:
+                content = result.strip()
+
+            title_result = trafilatura.extract_metadata(html_content)
+            if (
+                title_result
+                and hasattr(title_result, "title")
+                and title_result.title
+            ):
+                title = title_result.title
+
+        if not content:
+            soup = BeautifulSoup(html_content, "html.parser")
+
+            for tag in soup(
+                ["script", "style", "nav", "footer", "header", "aside", "noscript"]
+            ):
+                tag.decompose()
+
+            title_tag = soup.find("title")
+            if title_tag:
+                title = title_tag.get_text().strip()
+
+            article = soup.find("article")
+            if article:
+                content = article.get_text(separator=" ", strip=True)
+            else:
+                main = soup.find("main") or soup.find(
+                    "div",
+                    class_=lambda x: x and "content" in x.lower() if x else False,
+                )
+                if main:
+                    content = main.get_text(separator=" ", strip=True)
+                else:
+                    body = soup.find("body")
+                    content = (
+                        body.get_text(separator=" ", strip=True) if body else ""
+                    )
+
+        content = " ".join(content.split())
+        return {"title": title, "content": content} if title or content else None
+
     def scrape_batch(self, urls: List[str], max_workers: int = 5) -> List[Dict]:
         """Scrape multiple URLs in parallel."""
         results = []
@@ -173,6 +192,120 @@ class WebScraper:
                         results.append(result)
                 except Exception as e:
                     logging.debug(f"Scraping error: {e}")
+
+        return results
+
+    async def scrape_url_async(
+        self,
+        url: str,
+        session: "aiohttp.ClientSession",
+    ) -> Optional[Dict]:
+        """Scrape a single URL asynchronously using aiohttp."""
+        if not self.should_scrape(url):
+            return None
+
+        try:
+            async with session.get(
+                url,
+                timeout=aiohttp.ClientTimeout(total=self.timeout),
+                allow_redirects=True,
+            ) as response:
+                if response.status != 200:
+                    return None
+
+                content_type = response.headers.get("Content-Type", "")
+                if "text/html" not in content_type:
+                    return None
+
+                html_content = await response.text()
+
+            extracted = self._extract_from_html(html_content, url)
+            if extracted is None:
+                return None
+
+            content = extracted["content"]
+            title = extracted["title"]
+
+            if len(content) > self.max_content_length:
+                content = content[: self.max_content_length]
+
+            if len(content) < 50:
+                return None
+
+            return {
+                "url": url,
+                "title": title or url,
+                "content": content,
+                "source": "scraped",
+            }
+
+        except asyncio.TimeoutError:
+            logging.debug(f"Async scrape timeout: {url}")
+            return None
+        except Exception as e:
+            logging.debug(f"Async scrape failed {url}: {e}")
+            return None
+
+    async def scrape_batch_async(
+        self,
+        urls: List[str],
+        max_concurrent: int = 20,
+        progress_callback: Callable = None,
+    ) -> List[Dict]:
+        """Scrape multiple URLs in parallel using asyncio.gather + aiohttp.
+
+        Args:
+            urls: List of URLs to scrape
+            max_concurrent: Maximum concurrent connections (rate limiting)
+            progress_callback: Optional async callback(count, total) for progress tracking
+
+        Returns:
+            List of scraped result dicts
+        """
+        if not urls:
+            return []
+
+        if not AIOHTTP_AVAILABLE:
+            logging.warning("aiohttp not installed, falling back to sync scrape_batch")
+            return self.scrape_batch(urls, max_workers=max_concurrent)
+
+        semaphore = asyncio.Semaphore(max_concurrent)
+        results = []
+        total = len(urls)
+        completed = 0
+
+        async def scrape_with_semaphore(url: str, session: "aiohttp.ClientSession"):
+            nonlocal completed
+            async with semaphore:
+                result = await self.scrape_url_async(url, session)
+                completed += 1
+                if progress_callback:
+                    if asyncio.iscoroutinefunction(progress_callback):
+                        await progress_callback(completed, total)
+                    else:
+                        progress_callback(completed, total)
+                return result
+
+        connector = aiohttp.TCPConnector(
+            limit=max_concurrent,
+            limit_per_host=5,
+            force_close=True,
+            enable_cleanup_closed=True,
+        )
+
+        headers = dict(self.BROWSER_HEADERS)
+
+        async with aiohttp.ClientSession(
+            connector=connector,
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=self.timeout),
+        ) as session:
+            tasks = [scrape_with_semaphore(url, session) for url in urls]
+            gathered = await asyncio.gather(*tasks, return_exceptions=True)
+
+            for r in gathered:
+                if isinstance(r, dict) and r.get("content"):
+                    results.append(r)
 
         return results
 

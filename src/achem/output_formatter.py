@@ -365,6 +365,78 @@ def get_system_info() -> dict:
     }
 
 
+def print_async_stats(stats: dict) -> Table:
+    """Print async pipeline performance stats as a Rich table."""
+    if not stats:
+        return None
+
+    table = Table(
+        show_header=False,
+        show_edge=False,
+        pad_edge=False,
+        padding=(0, 1, 0, 0),
+        min_width=60,
+    )
+    table.add_column(justify="center", width=60)
+
+    parts = []
+    search_time = stats.get("search_time", 0)
+    scrape_time = stats.get("scrape_time", 0)
+    total = stats.get("total_sources", 0)
+    scraped = stats.get("scraped_count", 0)
+    reasoning_time = stats.get("reasoning_time", 0)
+
+    parts.append(f"[{c('accent_blue')}]DDG: {total} sources ({search_time}s)[/{c('accent_blue')}]")
+    parts.append(f"[{c('green')}]Scraped: {scraped} pages ({scrape_time}s)[/{c('green')}]")
+    plan_time = stats.get("plan_time", 0)
+    if plan_time:
+        parts.append(f"[{c('mauve')}]Planning ({plan_time}s)[/{c('mauve')}]")
+    if reasoning_time:
+        parts.append(f"[{c('pink')}]Synthesis ({reasoning_time}s)[/{c('pink')}]")
+
+    table.add_row("  ⚡  ".join(parts))
+    return table
+
+
+def print_references_table(references: list, console_obj: Console = None) -> Optional[Table]:
+    """Render a Rich table of cited sources with ref_id, title, and URL."""
+    if not references:
+        return None
+
+    cited = [r for r in references if r.get("cited")]
+    if not cited:
+        cited = references[:5]
+
+    table = Table(
+        show_header=True,
+        header_style=f"bold {c('pink')}",
+        border_style=c('overlay0'),
+        box=rich_box.SIMPLE,
+        pad_edge=False,
+        width=90,
+    )
+    table.add_column("#", justify="right", width=4)
+    table.add_column("Source", style=c('text'), width=50, no_wrap=False)
+    table.add_column("URL", style=c('overlay0'), width=36, no_wrap=False)
+
+    for r in cited[:10]:
+        ref_id = r.get("ref_id", "?")
+        title = r.get("title", "Unknown")[:48]
+        url = r.get("url", "")[:34]
+        marker = f"[{c('green')}]{ref_id}[/{c('green')}]" if r.get("cited") else f"[{c('overlay0')}]{ref_id}[/{c('overlay0')}]"
+        table.add_row(marker, title, url)
+
+    if len(cited) > 10:
+        remaining = len(cited) - 10
+        table.add_row(
+            f"[{c('overlay0')}]+{remaining}[/{c('overlay0')}]",
+            f"[{c('overlay0')}]... and {remaining} more sources[/{c('overlay0')}]",
+            "",
+        )
+
+    return table
+
+
 def get_interactive_input() -> Optional[str]:
     try:
         from prompt_toolkit import Prompt
