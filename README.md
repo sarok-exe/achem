@@ -1,5 +1,30 @@
 # achem
 
-Encrypt and decrypt Arabic text using character substitution. Supports multiple cipher modes for flexible encoding. Command-line tool written in Python.
+Deep web research tool. Searches DuckDuckGo + Wikipedia + academic sources, scrapes pages, generates AI summaries via OpenRouter/Groq/Gemini/Ollama.
 
-[Wiki](https://github.com/sarok-exe/achem/wiki)
+### How to use
+
+```
+git clone https://github.com/sarok-exe/achem.git
+cd achem
+pip install .
+```
+
+Set API keys in `~/.ACHEM/api.env`:
+
+```
+OPENROUTER_API_KEY=your_key
+```
+
+Run:
+
+```
+achem "<your query>"
+```
+
+Prefix with `l:` for local (TF-IDF) mode, `o:` for Ollama.
+
+```
+achem l:python async
+achem o:machine learning
+```
