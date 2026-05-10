@@ -1,5 +1,9 @@
 # achem
 
+<img src="achem-icon.svg" alt="achem" width="80">
+
+# achem
+
 Deep web research tool. Searches DuckDuckGo + Wikipedia + academic sources, scrapes pages, generates AI summaries via OpenRouter/Groq/Gemini/Ollama.
 
 ### How to use
